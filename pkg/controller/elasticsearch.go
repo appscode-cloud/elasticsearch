@@ -23,6 +23,7 @@ import (
 	"kubedb.dev/apimachinery/client/clientset/versioned/typed/kubedb/v1alpha1/util"
 	"kubedb.dev/apimachinery/pkg/eventer"
 	validator "kubedb.dev/elasticsearch/pkg/admission"
+	"kubedb.dev/elasticsearch/pkg/distribution"
 
 	"github.com/appscode/go/log"
 	"github.com/pkg/errors"
@@ -163,6 +164,22 @@ func (c *Controller) create(elasticsearch *api.Elasticsearch) error {
 	}
 
 	return nil
+}
+
+func (c *Controller) ensureElasticsearchNodeVersion2(es *api.Elasticsearch) (kutil.VerbType, error) {
+	if es == nil {
+		return kutil.VerbUnchanged, errors.New("Elasticsearch object is empty")
+	}
+
+	elastic, err := distribution.GetElasticsearch(c.Client, c.ExtClient, es)
+	if err != nil {
+		return kutil.VerbUnchanged, errors.Wrap(err, "failed to get elasticsearch distribution")
+	}
+
+	if err = elastic.EnsureCertSecret(); err != nil {
+		return kutil.VerbUnchanged, errors.Wrap(err, "failed to ensure certificates secret")
+	}
+	return "", nil
 }
 
 func (c *Controller) ensureElasticsearchNode(elasticsearch *api.Elasticsearch) (kutil.VerbType, error) {

@@ -1,6 +1,6 @@
 module kubedb.dev/elasticsearch
 
-go 1.12
+go 1.14
 
 require (
 	github.com/appscode/go v0.0.0-20191119085241-0887d8ec2ecc
@@ -24,6 +24,7 @@ require (
 	k8s.io/apiserver v0.0.0-20191114103151-9ca1dc586682
 	k8s.io/client-go v12.0.0+incompatible
 	k8s.io/kube-aggregator v0.0.0-20191114103820-f023614fb9ea
+	k8s.io/kubernetes v1.16.3
 	kmodules.xyz/client-go v0.0.0-20200216080917-08714f78f885
 	kmodules.xyz/constants v0.0.0-20191024095500-cd4313df4aa6
 	kmodules.xyz/custom-resources v0.0.0-20191130062942-f41b54f62419
@@ -69,6 +70,7 @@ replace (
 	k8s.io/metrics => k8s.io/metrics v0.0.0-20191114105837-a4a2842dc51b
 	k8s.io/repo-infra => k8s.io/repo-infra v0.0.0-20181204233714-00fe14e3d1a3
 	k8s.io/utils => k8s.io/utils v0.0.0-20190801114015-581e00157fb1
+	kmodules.xyz/objectstore-api => kmodules.xyz/objectstore-api v0.0.0-20200214040336-fe8f39a4210d
 	sigs.k8s.io/kustomize => sigs.k8s.io/kustomize v2.0.3+incompatible
 	sigs.k8s.io/structured-merge-diff => sigs.k8s.io/structured-merge-diff v0.0.0-20190817042607-6149e4549fca
 	sigs.k8s.io/yaml => sigs.k8s.io/yaml v1.1.0
