@@ -25,7 +25,7 @@ func (es *Elasticsearch) EnsureCertSecret() error {
 	certSecretVolumeSource := es.elasticsearch.Spec.CertificateSecret
 	if certSecretVolumeSource == nil {
 		var err error
-		if certSecretVolumeSource, err = es.CreateCertSecret(); err != nil {
+		if certSecretVolumeSource, err = es.createCertSecret(); err != nil {
 			return err
 		}
 		newES, _, err := util.PatchElasticsearch(es.extClient.KubedbV1alpha1(), es.elasticsearch, func(in *api.Elasticsearch) *api.Elasticsearch {
@@ -40,8 +40,8 @@ func (es *Elasticsearch) EnsureCertSecret() error {
 	return nil
 }
 
-func (es *Elasticsearch) CreateCertSecret() (*corev1.SecretVolumeSource, error) {
-	certSecret, err := es.FindCertSecret()
+func (es *Elasticsearch) createCertSecret() (*corev1.SecretVolumeSource, error) {
+	certSecret, err := es.findCertSecret()
 	if err != nil {
 		return nil, err
 	}
@@ -115,7 +115,7 @@ func (es *Elasticsearch) CreateCertSecret() (*corev1.SecretVolumeSource, error) 
 	return secretVolumeSource, nil
 }
 
-func (es *Elasticsearch) FindCertSecret() (*corev1.Secret, error) {
+func (es *Elasticsearch) findCertSecret() (*corev1.Secret, error) {
 	name := fmt.Sprintf("%v-cert", es.elasticsearch.OffshootName())
 
 	secret, err := es.kClient.CoreV1().Secrets(es.elasticsearch.Namespace).Get(name, metav1.GetOptions{})

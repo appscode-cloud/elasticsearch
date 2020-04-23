@@ -179,6 +179,20 @@ func (c *Controller) ensureElasticsearchNodeVersion2(es *api.Elasticsearch) (kut
 	if err = elastic.EnsureCertSecret(); err != nil {
 		return kutil.VerbUnchanged, errors.Wrap(err, "failed to ensure certificates secret")
 	}
+
+	if err = elastic.EnsureDatabaseSecret(); err != nil {
+		return kutil.VerbUnchanged, errors.Wrap(err, "failed to ensure database credential secret")
+	}
+
+	if err = elastic.EnsureDefaultConfig(); err != nil {
+		return kutil.VerbUnchanged, errors.Wrap(err, "failed to ensure default configuration for elasticsearch")
+	}
+
+	// Ensure Service account, role, rolebinding, and PSP for database statefulsets
+	if err := c.ensureDatabaseRBAC(elastic.GetElasticsearch()); err != nil {
+		return kutil.VerbUnchanged, errors.Wrap(err, "failed to create RBAC role or roleBinding")
+	}
+
 	return "", nil
 }
 

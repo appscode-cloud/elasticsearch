@@ -28,6 +28,10 @@ func New(kc kubernetes.Interface, extClient cs.Interface, es *api.Elasticsearch,
 	}
 }
 
+func (es *Elasticsearch) GetElasticsearch() *api.Elasticsearch {
+	return es.elasticsearch
+}
+
 func (es *Elasticsearch) GetInitContainers() ([]corev1.Container, error) {
 
 	return nil, nil

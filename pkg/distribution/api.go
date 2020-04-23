@@ -15,6 +15,9 @@ import (
 
 type Elasticsearch interface {
 	EnsureCertSecret() error
+	EnsureDatabaseSecret() error
+	EnsureDefaultConfig() error
+	GetElasticsearch() *api.Elasticsearch
 }
 
 func GetElasticsearch(kc kubernetes.Interface, extClient cs.Interface, es *api.Elasticsearch) (Elasticsearch, error) {
