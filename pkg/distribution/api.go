@@ -3,6 +3,8 @@ package distribution
 import (
 	"fmt"
 
+	kutil "kmodules.xyz/client-go"
+
 	catalog "kubedb.dev/apimachinery/apis/catalog/v1alpha1"
 	api "kubedb.dev/apimachinery/apis/kubedb/v1alpha1"
 	cs "kubedb.dev/apimachinery/client/clientset/versioned"
@@ -14,10 +16,14 @@ import (
 )
 
 type Elasticsearch interface {
+	GetElasticsearch() *api.Elasticsearch
 	EnsureCertSecret() error
 	EnsureDatabaseSecret() error
 	EnsureDefaultConfig() error
-	GetElasticsearch() *api.Elasticsearch
+	EnsureMasterNodes() (kutil.VerbType, error)
+	EnsureClientNodes() (kutil.VerbType, error)
+	EnsureDataNodes() (kutil.VerbType, error)
+	EnsureCombinedNode() (kutil.VerbType, error)
 }
 
 func GetElasticsearch(kc kubernetes.Interface, extClient cs.Interface, es *api.Elasticsearch) (Elasticsearch, error) {

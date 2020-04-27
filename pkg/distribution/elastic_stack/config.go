@@ -14,6 +14,8 @@ import (
 
 const (
 	ConfigFileName          = "elasticsearch.yml"
+	ConfigFileMountPath     = "/usr/share/elasticsearch/config"
+	TempConfigFileMountPath = "/elasticsearch/temp-config"
 	DatabaseConfigMapSuffix = "config"
 )
 

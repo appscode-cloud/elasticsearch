@@ -193,7 +193,35 @@ func (c *Controller) ensureElasticsearchNodeVersion2(es *api.Elasticsearch) (kut
 		return kutil.VerbUnchanged, errors.Wrap(err, "failed to create RBAC role or roleBinding")
 	}
 
-	return "", nil
+	vt := kutil.VerbUnchanged
+	topology := elastic.GetElasticsearch().Spec.Topology
+	if topology != nil {
+		vt1, err := elastic.EnsureClientNodes()
+		if err != nil {
+			return kutil.VerbUnchanged, err
+		}
+		vt2, err := elastic.EnsureMasterNodes()
+		if err != nil {
+			return kutil.VerbUnchanged, err
+		}
+		vt3, err := elastic.EnsureDataNodes()
+		if err != nil {
+			return kutil.VerbUnchanged, err
+		}
+
+		if vt1 == kutil.VerbCreated && vt2 == kutil.VerbCreated && vt3 == kutil.VerbCreated {
+			vt = kutil.VerbCreated
+		} else if vt1 == kutil.VerbPatched || vt2 == kutil.VerbPatched || vt3 == kutil.VerbPatched {
+			vt = kutil.VerbPatched
+		}
+	} else {
+		vt, err = elastic.EnsureCombinedNode()
+		if err != nil {
+			return kutil.VerbUnchanged, err
+		}
+	}
+
+	return vt, nil
 }
 
 func (c *Controller) ensureElasticsearchNode(elasticsearch *api.Elasticsearch) (kutil.VerbType, error) {
