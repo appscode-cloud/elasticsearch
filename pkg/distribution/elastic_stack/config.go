@@ -3,13 +3,12 @@ package elastic_stack
 import (
 	"fmt"
 
-	corev1 "k8s.io/api/core/v1"
-
-	kerr "k8s.io/apimachinery/pkg/api/errors"
-	core_util "kmodules.xyz/client-go/core/v1"
 	api "kubedb.dev/apimachinery/apis/kubedb/v1alpha1"
 
+	corev1 "k8s.io/api/core/v1"
+	kerr "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	core_util "kmodules.xyz/client-go/core/v1"
 )
 
 const (

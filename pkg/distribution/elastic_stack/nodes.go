@@ -4,13 +4,9 @@ import (
 	"fmt"
 
 	"github.com/appscode/go/types"
-
 	corev1 "k8s.io/api/core/v1"
-
-	"k8s.io/apimachinery/pkg/util/intstr"
-	api "kubedb.dev/apimachinery/apis/kubedb/v1alpha1"
-
 	kutil "kmodules.xyz/client-go"
+	core_util "kmodules.xyz/client-go/core/v1"
 )
 
 const (
@@ -22,19 +18,6 @@ const (
 	NodeRoleClient = "node.role.client"
 	NodeRoleData   = "node.role.data"
 	NodeRoleSet    = "set"
-)
-
-var (
-	defaultClientPort = corev1.ServicePort{
-		Name:       api.ElasticsearchRestPortName,
-		Port:       api.ElasticsearchRestPort,
-		TargetPort: intstr.FromString(api.ElasticsearchRestPortName),
-	}
-	defaultPeerPort = corev1.ServicePort{
-		Name:       api.ElasticsearchNodePortName,
-		Port:       api.ElasticsearchNodePort,
-		TargetPort: intstr.FromString(api.ElasticsearchNodePortName),
-	}
 )
 
 func (es *Elasticsearch) EnsureMasterNodes() (kutil.VerbType, error) {
@@ -66,7 +49,9 @@ func (es *Elasticsearch) EnsureClientNodes() (kutil.VerbType, error) {
 		heapSize = getHeapSizeForNode(request.Value())
 	}
 
-	// Environment variable list for main container
+	// Environment variable list for main container.
+	// These are node specific, i.e. changes depending on node type.
+	// Following are for Client node:
 	envList := []corev1.EnvVar{
 		{
 			Name:  "ES_JAVA_OPTS",
@@ -85,6 +70,12 @@ func (es *Elasticsearch) EnsureClientNodes() (kutil.VerbType, error) {
 			Value: "false",
 		},
 	}
+	// Upsert common environment variables.
+	// These are same for all type of node.
+	envList = es.upsertContainerEnv(envList)
+
+	// add/overwrite user provided env; these are provided via crd spec
+	envList = core_util.UpsertEnvVars(envList, es.elasticsearch.Spec.PodTemplate.Spec.Env...)
 
 	// Environment variables for init container (i.e. config-merger)
 	initEnvList := []corev1.EnvVar{

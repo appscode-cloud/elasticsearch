@@ -2,10 +2,15 @@ package elastic_stack
 
 import (
 	"fmt"
+	"strings"
 
-	"github.com/pkg/errors"
+	catalog "kubedb.dev/apimachinery/apis/catalog/v1alpha1"
+	api "kubedb.dev/apimachinery/apis/kubedb/v1alpha1"
+	"kubedb.dev/apimachinery/pkg/eventer"
 
+	appsv1 "k8s.io/api/apps/v1"
 	"github.com/appscode/go/types"
+	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
 	kerr "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -13,15 +18,26 @@ import (
 	kutil "kmodules.xyz/client-go"
 	app_util "kmodules.xyz/client-go/apps/v1"
 	core_util "kmodules.xyz/client-go/core/v1"
-	catalog "kubedb.dev/apimachinery/apis/catalog/v1alpha1"
-	api "kubedb.dev/apimachinery/apis/kubedb/v1alpha1"
-	"kubedb.dev/apimachinery/pkg/eventer"
 )
 
 const (
 	CustomConfigMountPath         = "/elasticsearch/custom-config"
 	ExporterCertDir               = "/usr/config/certs"
+	DataDir                       = "/usr/share/elasticsearch/data"
 	ConfigMergerInitContainerName = "config-merger"
+)
+
+var (
+	defaultClientPort = corev1.ContainerPort{
+		Name:          api.ElasticsearchRestPortName,
+		ContainerPort: api.ElasticsearchRestPort,
+		Protocol:      corev1.ProtocolTCP,
+	}
+	defaultPeerPort = corev1.ContainerPort{
+		Name:          api.ElasticsearchNodePortName,
+		ContainerPort: api.ElasticsearchNodePort,
+		Protocol:      corev1.ProtocolTCP,
+	}
 )
 
 func (es *Elasticsearch) ensureStatefulSet(
@@ -61,50 +77,29 @@ func (es *Elasticsearch) ensureStatefulSet(
 	if err != nil {
 		return kutil.VerbUnchanged, errors.Wrap(err, "failed to get initContainers")
 	}
-	if esVersion.Spec.AuthPlugin == catalog.ElasticsearchAuthPluginXpack {
-		initContainers = append(initContainers, upsertXpackInitContainer(elasticsearch, esVersion, envList))
+	initContainers = core_util.UpsertContainers(initContainers, es.elasticsearch.Spec.PodTemplate.Spec.InitContainers)
+
+	containers, err := es.getContainers(esNode, envList)
+	if err != nil {
+		return kutil.VerbUnchanged, errors.Wrap(err, "failed to get containers")
 	}
 
-	statefulSet, vt, err := app_util.CreateOrPatchStatefulSet(c.Client, statefulSetMeta, func(in *apps.StatefulSet) *apps.StatefulSet {
-		in.Labels = core_util.UpsertMap(labels, elasticsearch.OffshootLabels())
-		in.Annotations = elasticsearch.Spec.PodTemplate.Controller.Annotations
+	statefulSet, vt, err := app_util.CreateOrPatchStatefulSet(es.kClient, statefulSetMeta, func(in *appsv1.StatefulSet) *appsv1.StatefulSet {
+		in.Labels = core_util.UpsertMap(labels, es.elasticsearch.OffshootLabels())
+		in.Annotations = es.elasticsearch.Spec.PodTemplate.Controller.Annotations
 		core_util.EnsureOwnerReference(&in.ObjectMeta, owner)
 
-		in.Spec.Replicas = types.Int32P(replicas)
+		in.Spec.Replicas = replicas
+		in.Spec.ServiceName = es.elasticsearch.GvrSvcName()
 
-		in.Spec.ServiceName = elasticsearch.GvrSvcName()
-		in.Spec.Selector = &metav1.LabelSelector{
-			MatchLabels: labelSelector,
-		}
+		in.Spec.Selector = &metav1.LabelSelector{MatchLabels: labelSelector}
 		in.Spec.Template.Labels = labelSelector
-		in.Spec.Template.Annotations = elasticsearch.Spec.PodTemplate.Annotations
-		in.Spec.Template.Spec.InitContainers = core_util.UpsertContainers(
-			in.Spec.Template.Spec.InitContainers,
-			append(
-				initContainers,
-				elasticsearch.Spec.PodTemplate.Spec.InitContainers...,
-			),
-		)
-		in.Spec.Template.Spec.Containers = core_util.UpsertContainer(
-			in.Spec.Template.Spec.Containers,
-			core.Container{
-				Name:            api.ResourceSingularElasticsearch,
-				Image:           esVersion.Spec.DB.Image,
-				ImagePullPolicy: core.PullIfNotPresent,
-				SecurityContext: &core.SecurityContext{
-					Privileged: types.BoolP(false),
-					Capabilities: &core.Capabilities{
-						Add: []core.Capability{"IPC_LOCK", "SYS_RESOURCE"},
-					},
-				},
-				Resources:      resources,
-				LivenessProbe:  elasticsearch.Spec.PodTemplate.Spec.LivenessProbe,
-				ReadinessProbe: elasticsearch.Spec.PodTemplate.Spec.ReadinessProbe,
-				Lifecycle:      elasticsearch.Spec.PodTemplate.Spec.Lifecycle,
-			})
-		in = upsertEnv(in, elasticsearch, esVersion, envList)
-		in = upsertUserEnv(in, elasticsearch)
-		in = upsertPorts(in)
+
+		in.Spec.Template.Annotations = es.elasticsearch.Spec.PodTemplate.Annotations
+
+		in.Spec.Template.Spec.InitContainers = core_util.UpsertContainers(in.Spec.Template.Spec.InitContainers, initContainers)
+		in.Spec.Template.Spec.Containers = core_util.UpsertContainers(in.Spec.Template.Spec.Containers, containers)
+
 		in = upsertCustomConfig(in, elasticsearch, esVersion)
 
 		in.Spec.Template.Spec.NodeSelector = elasticsearch.Spec.PodTemplate.Spec.NodeSelector
@@ -172,6 +167,39 @@ func (es *Elasticsearch) ensureStatefulSet(
 	return vt, nil
 }
 
+func (es *Elasticsearch) getContainers(esNode *api.ElasticsearchNode, envList []corev1.EnvVar) ([]corev1.Container, error) {
+	if esNode == nil {
+		return nil, errors.New("ElasticsearchNode is empty")
+	}
+
+	containers := []corev1.Container{
+		{
+			Name:            api.ResourceSingularElasticsearch,
+			Image:           es.esVersion.Spec.DB.Image,
+			ImagePullPolicy: corev1.PullIfNotPresent,
+			Env:             envList,
+
+			// The clientPort is only necessary for Client nodes.
+			// But it is set for all type of nodes, so that our controller can
+			// communicate with each nodes specifically.
+			// The DBA controller uses the clientPort to check health of a node.
+			Ports: []corev1.ContainerPort{defaultClientPort, defaultPeerPort},
+			SecurityContext: &corev1.SecurityContext{
+				Privileged: types.BoolP(false),
+				Capabilities: &corev1.Capabilities{
+					Add: []corev1.Capability{"IPC_LOCK", "SYS_RESOURCE"},
+				},
+			},
+			Resources:      esNode.Resources,
+			LivenessProbe:  es.elasticsearch.Spec.PodTemplate.Spec.LivenessProbe,
+			ReadinessProbe: es.elasticsearch.Spec.PodTemplate.Spec.ReadinessProbe,
+			Lifecycle:      es.elasticsearch.Spec.PodTemplate.Spec.Lifecycle,
+		},
+	}
+
+	return containers, nil
+}
+
 func (es *Elasticsearch) getInitContainers(esNode *api.ElasticsearchNode, envList []corev1.EnvVar) ([]corev1.Container, error) {
 	if esNode == nil {
 		return nil, errors.New("ElasticsearchNode is empty")
@@ -191,26 +219,7 @@ func (es *Elasticsearch) getInitContainers(esNode *api.ElasticsearchNode, envLis
 	}
 
 	initContainers = es.upsertConfigMergerInitContainer(initContainers, envList)
-}
-
-func (es *Elasticsearch) checkStatefulSet(sName string) error {
-	elasticsearchName := es.elasticsearch.OffshootName()
-
-	// StatefulSet for Elasticsearch database
-	statefulSet, err := es.kClient.AppsV1().StatefulSets(es.elasticsearch.Namespace).Get(sName, metav1.GetOptions{})
-	if err != nil {
-		if kerr.IsNotFound(err) {
-			return nil
-		}
-		return err
-	}
-
-	if statefulSet.Labels[api.LabelDatabaseKind] != api.ResourceKindElasticsearch ||
-		statefulSet.Labels[api.LabelDatabaseName] != elasticsearchName {
-		return fmt.Errorf(`intended statefulSet "%v/%v" already exists`, es.elasticsearch.Namespace, sName)
-	}
-
-	return nil
+	return initContainers, nil
 }
 
 func (es *Elasticsearch) upsertConfigMergerInitContainer(initCon []corev1.Container, envList []corev1.EnvVar) []corev1.Container {
@@ -221,9 +230,10 @@ func (es *Elasticsearch) upsertConfigMergerInitContainer(initCon []corev1.Contai
 		},
 		{
 			Name:      "data",
-			MountPath: "/usr/share/elasticsearch/data",
+			MountPath: DataDir,
 		},
 	}
+
 	if !es.elasticsearch.Spec.DisableSecurity {
 		volumeMounts = append(volumeMounts, corev1.VolumeMount{
 			Name:      "temp-esconfig",
@@ -299,4 +309,104 @@ fi
 		},
 		VolumeMounts: volumeMounts,
 	}
+
+	return append(initCon, configMerger)
+}
+
+func (es *Elasticsearch) checkStatefulSet(sName string) error {
+	elasticsearchName := es.elasticsearch.OffshootName()
+
+	// StatefulSet for Elasticsearch database
+	statefulSet, err := es.kClient.AppsV1().StatefulSets(es.elasticsearch.Namespace).Get(sName, metav1.GetOptions{})
+	if err != nil {
+		if kerr.IsNotFound(err) {
+			return nil
+		}
+		return err
+	}
+
+	if statefulSet.Labels[api.LabelDatabaseKind] != api.ResourceKindElasticsearch ||
+		statefulSet.Labels[api.LabelDatabaseName] != elasticsearchName {
+		return fmt.Errorf(`intended statefulSet "%v/%v" already exists`, es.elasticsearch.Namespace, sName)
+	}
+
+	return nil
+}
+
+func (es *Elasticsearch) upsertContainerEnv(envList []corev1.EnvVar) []corev1.EnvVar {
+
+	envList = core_util.UpsertEnvVars(envList, []corev1.EnvVar{
+		{
+			Name: "node.name",
+			ValueFrom: &corev1.EnvVarSource{
+				FieldRef: &corev1.ObjectFieldSelector{
+					FieldPath: "metadata.name",
+				},
+			},
+		},
+		{
+			Name:  "cluster.name",
+			Value: es.elasticsearch.Name,
+		},
+		{
+			Name:  "network.host",
+			Value: "0.0.0.0",
+		},
+		{
+			Name: "ELASTIC_USER",
+			ValueFrom: &corev1.EnvVarSource{
+				SecretKeyRef: &corev1.SecretKeySelector{
+					LocalObjectReference: corev1.LocalObjectReference{
+						Name: es.elasticsearch.Spec.DatabaseSecret.SecretName,
+					},
+					Key: KeyAdminUserName,
+				},
+			},
+		},
+		{
+			Name: "ELASTIC_PASSWORD",
+			ValueFrom: &corev1.EnvVarSource{
+				SecretKeyRef: &corev1.SecretKeySelector{
+					LocalObjectReference: corev1.LocalObjectReference{
+						Name: es.elasticsearch.Spec.DatabaseSecret.SecretName,
+					},
+					Key: KeyAdminPassword,
+				},
+			},
+		},
+	}...)
+
+	if !es.elasticsearch.Spec.DisableSecurity {
+		envList = core_util.UpsertEnvVars(envList, []corev1.EnvVar{
+			{
+				Name: "KEY_PASS",
+				ValueFrom: &corev1.EnvVarSource{
+					SecretKeyRef: &corev1.SecretKeySelector{
+						LocalObjectReference: corev1.LocalObjectReference{
+							Name: es.elasticsearch.Spec.CertificateSecret.SecretName,
+						},
+						Key: "key_pass",
+					},
+				},
+			},
+			{
+				Name:  "xpack.security.http.ssl.enabled",
+				Value: fmt.Sprintf("%v", es.elasticsearch.Spec.EnableSSL),
+			},
+		}...)
+	}
+
+	if strings.HasPrefix(es.esVersion.Spec.Version, "7.") {
+		envList = core_util.UpsertEnvVars(envList, corev1.EnvVar{
+			Name:  "discovery.seed_hosts",
+			Value: es.elasticsearch.MasterServiceName(),
+		})
+	} else {
+		envList = core_util.UpsertEnvVars(envList, corev1.EnvVar{
+			Name:  "discovery.zen.ping.unicast.hosts",
+			Value: es.elasticsearch.MasterServiceName(),
+		})
+	}
+
+	return envList
 }
