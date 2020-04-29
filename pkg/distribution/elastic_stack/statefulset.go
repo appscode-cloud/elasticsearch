@@ -2,15 +2,15 @@ package elastic_stack
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 
-	catalog "kubedb.dev/apimachinery/apis/catalog/v1alpha1"
 	api "kubedb.dev/apimachinery/apis/kubedb/v1alpha1"
 	"kubedb.dev/apimachinery/pkg/eventer"
 
-	appsv1 "k8s.io/api/apps/v1"
 	"github.com/appscode/go/types"
 	"github.com/pkg/errors"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	kerr "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -73,15 +73,25 @@ func (es *Elasticsearch) ensureStatefulSet(
 	labelSelector := es.elasticsearch.OffshootSelectors()
 	labelSelector = core_util.UpsertMap(labelSelector, labels)
 
+	// Get default initContainers; i.e.
 	initContainers, err := es.getInitContainers(esNode, initEnvList)
 	if err != nil {
 		return kutil.VerbUnchanged, errors.Wrap(err, "failed to get initContainers")
 	}
+
+	// Add/Overwrite user provided initContainers
 	initContainers = core_util.UpsertContainers(initContainers, es.elasticsearch.Spec.PodTemplate.Spec.InitContainers)
 
+	// Get elasticsearch container.
+	// Also get monitoring sidecar if any.
 	containers, err := es.getContainers(esNode, envList)
 	if err != nil {
 		return kutil.VerbUnchanged, errors.Wrap(err, "failed to get containers")
+	}
+
+	volumes, pvc, err := es.getVolumes()
+	if err != nil {
+		return kutil.VerbUnchanged, errors.Wrap(err, "failed to get volumes")
 	}
 
 	statefulSet, vt, err := app_util.CreateOrPatchStatefulSet(es.kClient, statefulSetMeta, func(in *appsv1.StatefulSet) *appsv1.StatefulSet {
@@ -100,47 +110,44 @@ func (es *Elasticsearch) ensureStatefulSet(
 		in.Spec.Template.Spec.InitContainers = core_util.UpsertContainers(in.Spec.Template.Spec.InitContainers, initContainers)
 		in.Spec.Template.Spec.Containers = core_util.UpsertContainers(in.Spec.Template.Spec.Containers, containers)
 
-		in = upsertCustomConfig(in, elasticsearch, esVersion)
-
-		in.Spec.Template.Spec.NodeSelector = elasticsearch.Spec.PodTemplate.Spec.NodeSelector
-		in.Spec.Template.Spec.Affinity = elasticsearch.Spec.PodTemplate.Spec.Affinity
-		if elasticsearch.Spec.PodTemplate.Spec.SchedulerName != "" {
-			in.Spec.Template.Spec.SchedulerName = elasticsearch.Spec.PodTemplate.Spec.SchedulerName
+		in.Spec.Template.Spec.NodeSelector = es.elasticsearch.Spec.PodTemplate.Spec.NodeSelector
+		in.Spec.Template.Spec.Affinity = es.elasticsearch.Spec.PodTemplate.Spec.Affinity
+		if es.elasticsearch.Spec.PodTemplate.Spec.SchedulerName != "" {
+			in.Spec.Template.Spec.SchedulerName = es.elasticsearch.Spec.PodTemplate.Spec.SchedulerName
 		}
-		in.Spec.Template.Spec.Tolerations = elasticsearch.Spec.PodTemplate.Spec.Tolerations
-		in.Spec.Template.Spec.ImagePullSecrets = elasticsearch.Spec.PodTemplate.Spec.ImagePullSecrets
-		in.Spec.Template.Spec.PriorityClassName = elasticsearch.Spec.PodTemplate.Spec.PriorityClassName
-		in.Spec.Template.Spec.Priority = elasticsearch.Spec.PodTemplate.Spec.Priority
-		in.Spec.Template.Spec.SecurityContext = elasticsearch.Spec.PodTemplate.Spec.SecurityContext
+		in.Spec.Template.Spec.Tolerations = es.elasticsearch.Spec.PodTemplate.Spec.Tolerations
+		in.Spec.Template.Spec.ImagePullSecrets = es.elasticsearch.Spec.PodTemplate.Spec.ImagePullSecrets
+		in.Spec.Template.Spec.PriorityClassName = es.elasticsearch.Spec.PodTemplate.Spec.PriorityClassName
+		in.Spec.Template.Spec.Priority = es.elasticsearch.Spec.PodTemplate.Spec.Priority
+		in.Spec.Template.Spec.SecurityContext = es.elasticsearch.Spec.PodTemplate.Spec.SecurityContext
 
-		if isClient {
-			in = c.upsertMonitoringContainer(in, elasticsearch, esVersion)
-			in = upsertDatabaseSecretForSG(in, esVersion, elasticsearch.Spec.DatabaseSecret.SecretName)
-		}
-		if !elasticsearch.Spec.DisableSecurity {
-			in = upsertCertificate(in, elasticsearch.Spec.CertificateSecret.SecretName, isClient, esVersion)
-		}
-
-		if esVersion.Spec.AuthPlugin == catalog.ElasticsearchAuthPluginXpack &&
-			in.Spec.Template.Spec.SecurityContext == nil {
-			in.Spec.Template.Spec.SecurityContext = &core.PodSecurityContext{
+		// securityContext for x-pack
+		if in.Spec.Template.Spec.SecurityContext == nil {
+			in.Spec.Template.Spec.SecurityContext = &corev1.PodSecurityContext{
 				FSGroup: types.Int64P(1000),
 			}
 		}
 
-		in = upsertDatabaseConfigforXPack(in, elasticsearch, esVersion)
+		in.Spec.Template.Spec.ServiceAccountName = es.elasticsearch.Spec.PodTemplate.Spec.ServiceAccountName
 
-		in = upsertDataVolume(in, elasticsearch.Spec.StorageType, pvcSpec, esVersion)
-		in = upsertTemporaryVolume(in)
+		// Upsert volumeClaimTemplates if any
+		in.Spec.VolumeClaimTemplates = core_util.UpsertVolumeClaim(in.Spec.VolumeClaimTemplates, pvc)
+		// Upsert volumes
+		in.Spec.Template.Spec.Volumes = core_util.UpsertVolume(in.Spec.Template.Spec.Volumes, volumes...)
 
-		in.Spec.Template.Spec.ServiceAccountName = elasticsearch.Spec.PodTemplate.Spec.ServiceAccountName
-		in.Spec.UpdateStrategy = elasticsearch.Spec.UpdateStrategy
+		// Statefulset update strategy is set default to "OnDelete".
+		// Any kind of modification on Elasticsearch will be performed via ElasticsearchModificationRequest CRD.
+		// If user update the Elasticsearch object without ElasticsearchModificationRequest,
+		// user will have delete the pods manually to encounter the changes.
+		in.Spec.UpdateStrategy = appsv1.StatefulSetUpdateStrategy{
+			Type: appsv1.OnDeleteStatefulSetStrategyType,
+		}
 
 		return in
 	})
 
 	if err != nil {
-		return kutil.VerbUnchanged, err
+		return kutil.VerbUnchanged, errors.Wrap(err, "failed to create or patch statefulset")
 	}
 
 	if vt == kutil.VerbCreated || vt == kutil.VerbPatched {
@@ -167,9 +174,40 @@ func (es *Elasticsearch) ensureStatefulSet(
 	return vt, nil
 }
 
+func (es *Elasticsearch) getVolumes() ([]corev1.Volume, corev1.PersistentVolumeClaim, error) {
+
+}
+
 func (es *Elasticsearch) getContainers(esNode *api.ElasticsearchNode, envList []corev1.EnvVar) ([]corev1.Container, error) {
 	if esNode == nil {
 		return nil, errors.New("ElasticsearchNode is empty")
+	}
+
+	// Add volumeMounts for elasticsearch container
+	// 		- data directory
+	//		- configuration
+	// 		- temp directory
+	volumeMount := []corev1.VolumeMount{
+		{
+			Name:      "data",
+			MountPath: DataDir,
+		},
+		{
+			Name:      "esconfig",
+			MountPath: filepath.Join(ConfigFileMountPath, ConfigFileName),
+			SubPath:   ConfigFileName,
+		},
+		{
+			Name:      "temp",
+			MountPath: "/tmp",
+		},
+	}
+
+	if !es.elasticsearch.Spec.DisableSecurity {
+		volumeMount = core_util.UpsertVolumeMount(volumeMount, corev1.VolumeMount{
+			Name:      "certs",
+			MountPath: filepath.Join(ConfigFileMountPath, "certs"),
+		})
 	}
 
 	containers := []corev1.Container{
@@ -191,10 +229,20 @@ func (es *Elasticsearch) getContainers(esNode *api.ElasticsearchNode, envList []
 				},
 			},
 			Resources:      esNode.Resources,
+			VolumeMounts:   volumeMount,
 			LivenessProbe:  es.elasticsearch.Spec.PodTemplate.Spec.LivenessProbe,
 			ReadinessProbe: es.elasticsearch.Spec.PodTemplate.Spec.ReadinessProbe,
 			Lifecycle:      es.elasticsearch.Spec.PodTemplate.Spec.Lifecycle,
 		},
+	}
+
+	// upsert metrics exporter sidecar for monitoring purpose
+	var err error
+	if es.elasticsearch.Spec.Monitor != nil {
+		containers, err = es.upsertMonitoringContainer(containers)
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to get monitoring container")
+		}
 	}
 
 	return containers, nil
@@ -232,6 +280,14 @@ func (es *Elasticsearch) upsertConfigMergerInitContainer(initCon []corev1.Contai
 			Name:      "data",
 			MountPath: DataDir,
 		},
+	}
+
+	// mount path for custom configuration
+	if es.elasticsearch.Spec.ConfigSource != nil {
+		volumeMounts = core_util.UpsertVolumeMount(volumeMounts, corev1.VolumeMount{
+			Name:      "custom-config",
+			MountPath: CustomConfigMountPath,
+		})
 	}
 
 	if !es.elasticsearch.Spec.DisableSecurity {
