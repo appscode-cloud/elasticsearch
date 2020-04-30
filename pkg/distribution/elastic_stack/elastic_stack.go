@@ -4,7 +4,6 @@ import (
 	catalog "kubedb.dev/apimachinery/apis/catalog/v1alpha1"
 	api "kubedb.dev/apimachinery/apis/kubedb/v1alpha1"
 	cs "kubedb.dev/apimachinery/client/clientset/versioned"
-	"kubedb.dev/elasticsearch/pkg/distribution"
 
 	"k8s.io/client-go/kubernetes"
 )
@@ -15,8 +14,6 @@ type Elasticsearch struct {
 	elasticsearch *api.Elasticsearch
 	esVersion     *catalog.ElasticsearchVersion
 }
-
-var _ distribution.Elasticsearch = &Elasticsearch{}
 
 func New(kc kubernetes.Interface, extClient cs.Interface, es *api.Elasticsearch, esVersion *catalog.ElasticsearchVersion) *Elasticsearch {
 	return &Elasticsearch{

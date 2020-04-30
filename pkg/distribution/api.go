@@ -25,6 +25,8 @@ type Elasticsearch interface {
 	EnsureCombinedNode() (kutil.VerbType, error)
 }
 
+var _ Elasticsearch = &elastic_stack.Elasticsearch{}
+
 func GetElasticsearch(kc kubernetes.Interface, extClient cs.Interface, es *api.Elasticsearch) (Elasticsearch, error) {
 	if kc == nil {
 		return nil, errors.New("Kubernetes client is empty")

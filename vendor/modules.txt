@@ -424,6 +424,11 @@ golang.org/x/time/rate
 # gomodules.xyz/cert v1.0.2
 ## explicit
 gomodules.xyz/cert
+# gomodules.xyz/envsubst v0.1.0
+## explicit
+gomodules.xyz/envsubst
+gomodules.xyz/envsubst/parse
+gomodules.xyz/envsubst/path
 # gomodules.xyz/jsonpatch/v2 v2.0.1
 gomodules.xyz/jsonpatch/v2
 # gomodules.xyz/stow v0.2.4

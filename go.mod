@@ -16,7 +16,7 @@ require (
 	github.com/spf13/pflag v1.0.5
 	golang.org/x/crypto v0.0.0-20190611184440-5c40567a22f8
 	gomodules.xyz/cert v1.0.2
-	gomodules.xyz/envsubst v0.1.0 // indirect
+	gomodules.xyz/envsubst v0.1.0
 	gopkg.in/olivere/elastic.v5 v5.0.83
 	gopkg.in/olivere/elastic.v6 v6.2.26
 	k8s.io/api v0.0.0-20191122220107-b5267f2975e0

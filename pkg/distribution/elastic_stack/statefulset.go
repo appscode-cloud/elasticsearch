@@ -1,23 +1,26 @@
 package elastic_stack
 
 import (
+	"encoding/json"
 	"fmt"
 	"path/filepath"
 	"strings"
 
 	api "kubedb.dev/apimachinery/apis/kubedb/v1alpha1"
-	"kubedb.dev/apimachinery/pkg/eventer"
+	cutil "kubedb.dev/elasticsearch/pkg/util/cert"
 
+	"github.com/appscode/go/log"
 	"github.com/appscode/go/types"
 	"github.com/pkg/errors"
+	"gomodules.xyz/envsubst"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	kerr "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/kubernetes/pkg/apis/core"
 	kutil "kmodules.xyz/client-go"
 	app_util "kmodules.xyz/client-go/apps/v1"
 	core_util "kmodules.xyz/client-go/core/v1"
+	mona "kmodules.xyz/monitoring-agent-api/api/v1"
 )
 
 const (
@@ -45,6 +48,7 @@ func (es *Elasticsearch) ensureStatefulSet(
 	stsName string,
 	labels map[string]string,
 	replicas *int32,
+	nodeRole string,
 	envList []corev1.EnvVar,
 	initEnvList []corev1.EnvVar,
 ) (kutil.VerbType, error) {
@@ -73,6 +77,11 @@ func (es *Elasticsearch) ensureStatefulSet(
 	labelSelector := es.elasticsearch.OffshootSelectors()
 	labelSelector = core_util.UpsertMap(labelSelector, labels)
 
+	affinity, err := parseAffinityTemplate(es.elasticsearch.Spec.PodTemplate.Spec.Affinity.DeepCopy(), nodeRole)
+	if err != nil {
+		return kutil.VerbUnchanged, errors.Wrap(err, "failed to parse the affinity template")
+	}
+
 	// Get default initContainers; i.e.
 	initContainers, err := es.getInitContainers(esNode, initEnvList)
 	if err != nil {
@@ -89,7 +98,7 @@ func (es *Elasticsearch) ensureStatefulSet(
 		return kutil.VerbUnchanged, errors.Wrap(err, "failed to get containers")
 	}
 
-	volumes, pvc, err := es.getVolumes()
+	volumes, pvc, err := es.getVolumes(esNode)
 	if err != nil {
 		return kutil.VerbUnchanged, errors.Wrap(err, "failed to get volumes")
 	}
@@ -111,7 +120,7 @@ func (es *Elasticsearch) ensureStatefulSet(
 		in.Spec.Template.Spec.Containers = core_util.UpsertContainers(in.Spec.Template.Spec.Containers, containers)
 
 		in.Spec.Template.Spec.NodeSelector = es.elasticsearch.Spec.PodTemplate.Spec.NodeSelector
-		in.Spec.Template.Spec.Affinity = es.elasticsearch.Spec.PodTemplate.Spec.Affinity
+		in.Spec.Template.Spec.Affinity = affinity
 		if es.elasticsearch.Spec.PodTemplate.Spec.SchedulerName != "" {
 			in.Spec.Template.Spec.SchedulerName = es.elasticsearch.Spec.PodTemplate.Spec.SchedulerName
 		}
@@ -131,7 +140,7 @@ func (es *Elasticsearch) ensureStatefulSet(
 		in.Spec.Template.Spec.ServiceAccountName = es.elasticsearch.Spec.PodTemplate.Spec.ServiceAccountName
 
 		// Upsert volumeClaimTemplates if any
-		in.Spec.VolumeClaimTemplates = core_util.UpsertVolumeClaim(in.Spec.VolumeClaimTemplates, pvc)
+		in.Spec.VolumeClaimTemplates = core_util.UpsertVolumeClaim(in.Spec.VolumeClaimTemplates, *pvc)
 		// Upsert volumes
 		in.Spec.Template.Spec.Volumes = core_util.UpsertVolume(in.Spec.Template.Spec.Volumes, volumes...)
 
@@ -151,31 +160,164 @@ func (es *Elasticsearch) ensureStatefulSet(
 	}
 
 	if vt == kutil.VerbCreated || vt == kutil.VerbPatched {
-		// Check StatefulSet Pod status
-		if err := c.CheckStatefulSetPodStatus(statefulSet); err != nil {
+		// Check whether StatefulSet's Pods are running.
+		// Given timeout: 10 minutes
+		// TODO: what if there is a huge number of replicas, is this timeout enough?
+		if err := es.checkStatefulSetPodStatus(statefulSet); err != nil {
 			return kutil.VerbUnchanged, err
 		}
-		c.recorder.Eventf(
-			elasticsearch,
-			core.EventTypeNormal,
-			eventer.EventReasonSuccessful,
-			"Successfully %v StatefulSet",
-			vt,
-		)
 	}
 
 	// ensure pdb
-	if maxUnavailable != nil {
-		if err := c.createPodDisruptionBudget(statefulSet, maxUnavailable); err != nil {
-			return vt, err
+	if esNode.MaxUnavailable != nil {
+		if err := es.createPodDisruptionBudget(statefulSet, esNode.MaxUnavailable); err != nil {
+			return vt, errors.Wrap(err, "failed to create PodDisruptionBudget")
 		}
 	}
 
 	return vt, nil
 }
 
-func (es *Elasticsearch) getVolumes() ([]corev1.Volume, corev1.PersistentVolumeClaim, error) {
+func (es *Elasticsearch) getVolumes(esNode *api.ElasticsearchNode) ([]corev1.Volume, *corev1.PersistentVolumeClaim, error) {
+	if esNode == nil {
+		return nil, nil, errors.New("elasticsearchNode is empty")
+	}
 
+	var volumes []corev1.Volume
+	var pvc *corev1.PersistentVolumeClaim
+
+	// Upsert Volume for configuration directory
+	volumes = core_util.UpsertVolume(volumes, corev1.Volume{
+		Name: "esconfig",
+		VolumeSource: corev1.VolumeSource{
+			EmptyDir: &corev1.EmptyDirVolumeSource{},
+		},
+	})
+
+	// Upsert Volume for the default configuration provided for x-pack.
+	// This configuration will also be copied as default elasticsearch configuration (i.e. elasticsearch.yaml)
+	// from config-merger initContainer.
+	if !es.elasticsearch.Spec.DisableSecurity {
+		cmName := fmt.Sprintf("%v-%v", es.elasticsearch.OffshootName(), DatabaseConfigMapSuffix)
+		_, err := es.kClient.CoreV1().ConfigMaps(es.elasticsearch.GetNamespace()).Get(cmName, metav1.GetOptions{})
+		if err != nil {
+			return nil, nil, errors.Wrap(err, fmt.Sprintf("failed to get configmap: %s/%s", es.elasticsearch.GetNamespace(), cmName))
+		}
+
+		volumes = core_util.UpsertVolume(volumes, corev1.Volume{
+			Name: "temp-esconfig",
+			VolumeSource: corev1.VolumeSource{
+				ConfigMap: &corev1.ConfigMapVolumeSource{
+					LocalObjectReference: corev1.LocalObjectReference{
+						Name: cmName,
+					},
+				},
+			},
+		})
+	}
+
+	// Upsert Volume for user provided custom configuration.
+	// These configuration will be merged to default config yaml (ie. elasticsearch.yaml)
+	// from config-merger initContainer.
+	if es.elasticsearch.Spec.ConfigSource != nil {
+		volumes = core_util.UpsertVolume(volumes, corev1.Volume{
+			Name:         "custom-config",
+			VolumeSource: *es.elasticsearch.Spec.ConfigSource,
+		})
+	}
+
+	// Upsert Volume for data directory.
+	// If storageType is "Ephemeral", add volume of "EmptyDir" type.
+	// The storageType is default to "Durable".
+	if es.elasticsearch.Spec.StorageType == api.StorageTypeEphemeral {
+		ed := corev1.EmptyDirVolumeSource{}
+		if esNode.Storage != nil {
+			if sz, found := esNode.Storage.Resources.Requests[corev1.ResourceStorage]; found {
+				ed.SizeLimit = &sz
+			}
+		}
+		volumes = core_util.UpsertVolume(volumes, corev1.Volume{
+			Name: "data",
+			VolumeSource: corev1.VolumeSource{
+				EmptyDir: &ed,
+			},
+		})
+	} else {
+		if len(esNode.Storage.AccessModes) == 0 {
+			esNode.Storage.AccessModes = []corev1.PersistentVolumeAccessMode{
+				corev1.ReadWriteOnce,
+			}
+			log.Infof(`Using "%v" as AccessModes in "%v"`, corev1.ReadWriteOnce, esNode.Storage)
+		}
+
+		pvc = &corev1.PersistentVolumeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "data",
+			},
+			Spec: *esNode.Storage,
+		}
+		if esNode.Storage.StorageClassName != nil {
+			pvc.Annotations = map[string]string{
+				"volume.beta.kubernetes.io/storage-class": *esNode.Storage.StorageClassName,
+			}
+		}
+	}
+
+	// Upsert Volume for certificates
+	if es.elasticsearch.Spec.CertificateSecret == nil && !es.elasticsearch.Spec.DisableSecurity {
+		return nil, nil, errors.New("Certificate secret is missing")
+	}
+	if !es.elasticsearch.Spec.DisableSecurity {
+		volumes = core_util.UpsertVolume(volumes, corev1.Volume{
+			Name: "certs",
+			VolumeSource: corev1.VolumeSource{
+				Secret: &corev1.SecretVolumeSource{
+					SecretName: es.elasticsearch.Spec.CertificateSecret.SecretName,
+					Items: []corev1.KeyToPath{
+						{
+							Key:  cutil.RootKeyStore,
+							Path: cutil.RootKeyStore,
+						},
+						{
+							Key:  cutil.NodeKeyStore,
+							Path: cutil.NodeKeyStore,
+						},
+						{
+							Key:  cutil.ClientKeyStore,
+							Path: cutil.ClientKeyStore,
+						},
+					},
+				},
+			},
+		})
+	}
+
+	// Upsert Volume for monitoring sidecar
+	if es.elasticsearch.GetMonitoringVendor() == mona.VendorPrometheus && es.elasticsearch.Spec.EnableSSL {
+		volumes = core_util.UpsertVolume(volumes, corev1.Volume{
+			Name: "exporter-certs",
+			VolumeSource: corev1.VolumeSource{
+				Secret: &corev1.SecretVolumeSource{
+					SecretName: es.elasticsearch.Spec.CertificateSecret.SecretName,
+					Items: []corev1.KeyToPath{
+						{
+							Key:  "root.pem",
+							Path: "root.pem",
+						},
+					},
+				},
+			},
+		})
+	}
+
+	// Upsert temp Volume
+	volumes = core_util.UpsertVolume(volumes, corev1.Volume{
+		Name: "temp",
+		VolumeSource: corev1.VolumeSource{
+			EmptyDir: &corev1.EmptyDirVolumeSource{},
+		},
+	})
+	return volumes, pvc, nil
 }
 
 func (es *Elasticsearch) getContainers(esNode *api.ElasticsearchNode, envList []corev1.EnvVar) ([]corev1.Container, error) {
@@ -465,4 +607,44 @@ func (es *Elasticsearch) upsertContainerEnv(envList []corev1.EnvVar) []corev1.En
 	}
 
 	return envList
+}
+
+func (es *Elasticsearch) checkStatefulSetPodStatus(statefulSet *appsv1.StatefulSet) error {
+	err := core_util.WaitUntilPodRunningBySelector(
+		es.kClient,
+		statefulSet.Namespace,
+		statefulSet.Spec.Selector,
+		int(types.Int32(statefulSet.Spec.Replicas)),
+	)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func parseAffinityTemplate(affinity *corev1.Affinity, nodeRole string) (*corev1.Affinity, error) {
+	if affinity == nil {
+		return nil, errors.New("affinity is nil")
+	}
+
+	templateMap := map[string]string{
+		api.ElasticsearchNodeAffinityTemplateVar: nodeRole,
+	}
+
+	jsonObj, err := json.Marshal(affinity)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to marshal affinity")
+	}
+
+	resolved, err := envsubst.EvalMap(string(jsonObj), templateMap)
+	if err != nil {
+		return nil, err
+	}
+
+	err = json.Unmarshal([]byte(resolved), affinity)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to unmarshal the affinity")
+	}
+
+	return affinity, nil
 }

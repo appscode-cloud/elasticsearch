@@ -98,7 +98,7 @@ func (es *Elasticsearch) EnsureClientNodes() (kutil.VerbType, error) {
 		replicas = clientNode.Replicas
 	}
 
-	return es.ensureStatefulSet(&clientNode, statefulSetName, labels, replicas, envList, initEnvList)
+	return es.ensureStatefulSet(&clientNode, statefulSetName, labels, replicas, NodeRoleClient, envList, initEnvList)
 }
 
 func (es *Elasticsearch) EnsureCombinedNode() (kutil.VerbType, error) {

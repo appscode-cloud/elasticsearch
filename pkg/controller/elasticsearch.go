@@ -76,7 +76,7 @@ func (c *Controller) create(elasticsearch *api.Elasticsearch) error {
 	}
 
 	// ensure database StatefulSet
-	vt2, err := c.ensureElasticsearchNode(elasticsearch)
+	vt2, err := c.ensureElasticsearchNodeVersion2(elasticsearch)
 	if err != nil {
 		return err
 	}
