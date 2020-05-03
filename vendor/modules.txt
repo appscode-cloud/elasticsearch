@@ -20,7 +20,7 @@ github.com/NYTimes/gziphandler
 github.com/PuerkitoBio/purell
 # github.com/PuerkitoBio/urlesc v0.0.0-20170810143723-de5bf2ad4578
 github.com/PuerkitoBio/urlesc
-# github.com/appscode/go v0.0.0-20191119085241-0887d8ec2ecc
+# github.com/appscode/go v0.0.0-20200323182826-54e98e09185a
 ## explicit
 github.com/appscode/go/analytics
 github.com/appscode/go/arrays
@@ -993,7 +993,7 @@ k8s.io/utils/integer
 k8s.io/utils/path
 k8s.io/utils/pointer
 k8s.io/utils/trace
-# kmodules.xyz/client-go v0.0.0-20200216080917-08714f78f885
+# kmodules.xyz/client-go v0.0.0-20200305091010-36ee6a593ed3
 ## explicit
 kmodules.xyz/client-go
 kmodules.xyz/client-go/admissionregistration/v1beta1
@@ -1052,7 +1052,7 @@ kmodules.xyz/prober/api/v1
 ## explicit
 kmodules.xyz/webhook-runtime/admission/v1beta1
 kmodules.xyz/webhook-runtime/registry/admissionreview/v1beta1
-# kubedb.dev/apimachinery v0.13.0-rc.4.0.20200321030403-83c8e40a52cd
+# kubedb.dev/apimachinery v0.13.0-rc.4.0.20200503044057-fc256f0aa878
 ## explicit
 kubedb.dev/apimachinery/api/crds
 kubedb.dev/apimachinery/apis

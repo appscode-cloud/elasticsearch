@@ -350,8 +350,8 @@ install:
 		--set kubedb.tag=$(TAG) \
 		--set imagePullPolicy=Always \
 		$(IMAGE_PULL_SECRETS); \
-	kubectl wait --for=condition=Ready pods -n kube-system -l app=kubedb --timeout=5m; \
-	kubectl wait --for=condition=Available apiservice -l app=kubedb --timeout=5m; \
+	kubectl wait --for=condition=Ready pods -n kube-system -l app.kubernetes.io/instance=kubedb --timeout=5m; \
+	kubectl wait --for=condition=Available apiservice -l app.kubernetes.io/instance=kubedb --timeout=5m; \
 	helm install kubedb-catalog charts/kubedb-catalog \
 		--namespace=kube-system \
 		--set catalog.elasticsearch=true \
@@ -373,7 +373,7 @@ uninstall:
 
 .PHONY: purge
 purge: uninstall
-	kubectl delete crds -l app=kubedb
+	kubectl delete crds -l app.kubernetes.io/instance=kubedb
 
 .PHONY: dev
 dev: gen fmt push
