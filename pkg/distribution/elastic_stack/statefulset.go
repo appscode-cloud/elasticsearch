@@ -648,3 +648,35 @@ func parseAffinityTemplate(affinity *corev1.Affinity, nodeRole string) (*corev1.
 
 	return affinity, nil
 }
+
+// INITIAL_MASTER_NODES value for >= ES7
+func (es *Elasticsearch) getInitialMasterNodes() string {
+	var value string
+	stsName := es.elasticsearch.OffshootName()
+	replicas := types.Int32(es.elasticsearch.Spec.Replicas)
+	if es.elasticsearch.Spec.Topology != nil {
+		// If replicas is not provided, default to 1
+		if es.elasticsearch.Spec.Topology.Master.Replicas != nil {
+			replicas = types.Int32(es.elasticsearch.Spec.Topology.Master.Replicas)
+		} else {
+			replicas = 1
+		}
+
+		// If master.prefix is provided, name will be "GivenPrefix-ESName".
+		// The master.prefix is default to "master".
+		if es.elasticsearch.Spec.Topology.Master.Prefix != "" {
+			stsName = fmt.Sprintf("%s-%s", es.elasticsearch.Spec.Topology.Master.Prefix, stsName)
+		} else {
+			stsName = fmt.Sprintf("%s-%s", DefaultMasterNodePrefix, stsName)
+		}
+	}
+
+	for i := int32(0); i < replicas; i++ {
+		if i != 0 {
+			value += ","
+		}
+		value += fmt.Sprintf("%v-%v", stsName, i)
+	}
+
+	return value
+}
