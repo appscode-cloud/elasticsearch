@@ -76,7 +76,7 @@ func (c *Controller) create(elasticsearch *api.Elasticsearch) error {
 	}
 
 	// ensure database StatefulSet
-	vt2, err := c.ensureElasticsearchNodeVersion2(elasticsearch)
+	elasticsearch, vt2, err := c.ensureElasticsearchNodeVersion2(elasticsearch)
 	if err != nil {
 		return err
 	}
@@ -166,31 +166,31 @@ func (c *Controller) create(elasticsearch *api.Elasticsearch) error {
 	return nil
 }
 
-func (c *Controller) ensureElasticsearchNodeVersion2(es *api.Elasticsearch) (kutil.VerbType, error) {
+func (c *Controller) ensureElasticsearchNodeVersion2(es *api.Elasticsearch) (*api.Elasticsearch, kutil.VerbType, error) {
 	if es == nil {
-		return kutil.VerbUnchanged, errors.New("Elasticsearch object is empty")
+		return nil, kutil.VerbUnchanged, errors.New("Elasticsearch object is empty")
 	}
 
 	elastic, err := distribution.GetElasticsearch(c.Client, c.ExtClient, es)
 	if err != nil {
-		return kutil.VerbUnchanged, errors.Wrap(err, "failed to get elasticsearch distribution")
+		return nil, kutil.VerbUnchanged, errors.Wrap(err, "failed to get elasticsearch distribution")
 	}
 
 	if err = elastic.EnsureCertSecret(); err != nil {
-		return kutil.VerbUnchanged, errors.Wrap(err, "failed to ensure certificates secret")
+		return nil, kutil.VerbUnchanged, errors.Wrap(err, "failed to ensure certificates secret")
 	}
 
 	if err = elastic.EnsureDatabaseSecret(); err != nil {
-		return kutil.VerbUnchanged, errors.Wrap(err, "failed to ensure database credential secret")
+		return nil, kutil.VerbUnchanged, errors.Wrap(err, "failed to ensure database credential secret")
 	}
 
 	if err = elastic.EnsureDefaultConfig(); err != nil {
-		return kutil.VerbUnchanged, errors.Wrap(err, "failed to ensure default configuration for elasticsearch")
+		return nil, kutil.VerbUnchanged, errors.Wrap(err, "failed to ensure default configuration for elasticsearch")
 	}
 
 	// Ensure Service account, role, rolebinding, and PSP for database statefulsets
 	if err := c.ensureDatabaseRBAC(elastic.GetElasticsearch()); err != nil {
-		return kutil.VerbUnchanged, errors.Wrap(err, "failed to create RBAC role or roleBinding")
+		return nil, kutil.VerbUnchanged, errors.Wrap(err, "failed to create RBAC role or roleBinding")
 	}
 
 	vt := kutil.VerbUnchanged
@@ -198,15 +198,15 @@ func (c *Controller) ensureElasticsearchNodeVersion2(es *api.Elasticsearch) (kut
 	if topology != nil {
 		vt1, err := elastic.EnsureClientNodes()
 		if err != nil {
-			return kutil.VerbUnchanged, err
+			return nil, kutil.VerbUnchanged, err
 		}
 		vt2, err := elastic.EnsureMasterNodes()
 		if err != nil {
-			return kutil.VerbUnchanged, err
+			return nil, kutil.VerbUnchanged, err
 		}
 		vt3, err := elastic.EnsureDataNodes()
 		if err != nil {
-			return kutil.VerbUnchanged, err
+			return nil, kutil.VerbUnchanged, err
 		}
 
 		if vt1 == kutil.VerbCreated && vt2 == kutil.VerbCreated && vt3 == kutil.VerbCreated {
@@ -217,11 +217,14 @@ func (c *Controller) ensureElasticsearchNodeVersion2(es *api.Elasticsearch) (kut
 	} else {
 		vt, err = elastic.EnsureCombinedNode()
 		if err != nil {
-			return kutil.VerbUnchanged, err
+			return nil, kutil.VerbUnchanged, err
 		}
 	}
 
-	return vt, nil
+	// Need some time to build elasticsearch cluster. Nodes will communicate with each other
+	time.Sleep(time.Second * 30)
+
+	return elastic.GetElasticsearch(), vt, nil
 }
 
 func (c *Controller) ensureElasticsearchNode(elasticsearch *api.Elasticsearch) (kutil.VerbType, error) {

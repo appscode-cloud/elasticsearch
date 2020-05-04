@@ -92,12 +92,13 @@ func (es *Elasticsearch) ensureStatefulSet(
 	labelSelector := es.elasticsearch.OffshootSelectors()
 	labelSelector = core_util.UpsertMap(labelSelector, labels)
 
+	// Node affinity is added to support, multi-regional cluster.
 	affinity, err := parseAffinityTemplate(es.elasticsearch.Spec.PodTemplate.Spec.Affinity.DeepCopy(), nodeRole)
 	if err != nil {
 		return kutil.VerbUnchanged, errors.Wrap(err, "failed to parse the affinity template")
 	}
 
-	// Get default initContainers; i.e.
+	// Get default initContainers; i.e. config-merger
 	initContainers, err := es.getInitContainers(esNode, initEnvList)
 	if err != nil {
 		return kutil.VerbUnchanged, errors.Wrap(err, "failed to get initContainers")
