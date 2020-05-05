@@ -23,7 +23,7 @@ import (
 
 	api "kubedb.dev/apimachinery/apis/kubedb/v1alpha1"
 	"kubedb.dev/apimachinery/client/clientset/versioned/typed/kubedb/v1alpha1/util"
-	cutil "kubedb.dev/elasticsearch/pkg/util/cert"
+	certlib "kubedb.dev/elasticsearch/pkg/lib/cert"
 
 	"github.com/appscode/go/crypto/rand"
 	"gomodules.xyz/cert"
@@ -67,45 +67,45 @@ func (es *Elasticsearch) createCertSecret() (*corev1.SecretVolumeSource, error) 
 		}, nil
 	}
 
-	certPath := fmt.Sprintf("%v/%v", cutil.CertsDir, rand.Characters(3))
+	certPath := fmt.Sprintf("%v/%v", certlib.CertsDir, rand.Characters(3))
 	if err := os.MkdirAll(certPath, os.ModePerm); err != nil {
 		return nil, err
 	}
 
-	caKey, caCert, pass, err := cutil.CreateCaCertificate(certPath)
+	caKey, caCert, pass, err := certlib.CreateCaCertificate(certPath)
 	if err != nil {
 		return nil, err
 	}
-	err = cutil.CreateNodeCertificate(certPath, es.elasticsearch, caKey, caCert, pass)
+	err = certlib.CreateNodeCertificate(certPath, es.elasticsearch, caKey, caCert, pass)
 	if err != nil {
 		return nil, err
 	}
 
-	root, err := ioutil.ReadFile(filepath.Join(certPath, cutil.RootKeyStore))
+	root, err := ioutil.ReadFile(filepath.Join(certPath, certlib.RootKeyStore))
 	if err != nil {
 		return nil, err
 	}
-	node, err := ioutil.ReadFile(filepath.Join(certPath, cutil.NodeKeyStore))
+	node, err := ioutil.ReadFile(filepath.Join(certPath, certlib.NodeKeyStore))
 	if err != nil {
 		return nil, err
 	}
 
 	data := map[string][]byte{
-		cutil.RootKeyStore: root,
-		cutil.NodeKeyStore: node,
+		certlib.RootKeyStore: root,
+		certlib.NodeKeyStore: node,
 	}
 
-	if err := cutil.CreateClientCertificate(certPath, es.elasticsearch, caKey, caCert, pass); err != nil {
+	if err := certlib.CreateClientCertificate(certPath, es.elasticsearch, caKey, caCert, pass); err != nil {
 		return nil, err
 	}
 
-	client, err := ioutil.ReadFile(filepath.Join(certPath, cutil.ClientKeyStore))
+	client, err := ioutil.ReadFile(filepath.Join(certPath, certlib.ClientKeyStore))
 	if err != nil {
 		return nil, err
 	}
 
-	data[cutil.RootCert] = cert.EncodeCertPEM(caCert)
-	data[cutil.ClientKeyStore] = client
+	data[certlib.RootCert] = cert.EncodeCertPEM(caCert)
+	data[certlib.ClientKeyStore] = client
 
 	name := fmt.Sprintf("%v-cert", es.elasticsearch.OffshootName())
 	secret := &corev1.Secret{

@@ -22,7 +22,7 @@ import (
 	"strings"
 
 	api "kubedb.dev/apimachinery/apis/kubedb/v1alpha1"
-	cutil "kubedb.dev/elasticsearch/pkg/util/cert"
+	certlib "kubedb.dev/elasticsearch/pkg/lib/cert"
 
 	"github.com/appscode/go/log"
 	"github.com/appscode/go/types"
@@ -291,16 +291,16 @@ func (es *Elasticsearch) getVolumes(esNode *api.ElasticsearchNode) ([]corev1.Vol
 					SecretName: es.elasticsearch.Spec.CertificateSecret.SecretName,
 					Items: []corev1.KeyToPath{
 						{
-							Key:  cutil.RootKeyStore,
-							Path: cutil.RootKeyStore,
+							Key:  certlib.RootKeyStore,
+							Path: certlib.RootKeyStore,
 						},
 						{
-							Key:  cutil.NodeKeyStore,
-							Path: cutil.NodeKeyStore,
+							Key:  certlib.NodeKeyStore,
+							Path: certlib.NodeKeyStore,
 						},
 						{
-							Key:  cutil.ClientKeyStore,
-							Path: cutil.ClientKeyStore,
+							Key:  certlib.ClientKeyStore,
+							Path: certlib.ClientKeyStore,
 						},
 					},
 				},

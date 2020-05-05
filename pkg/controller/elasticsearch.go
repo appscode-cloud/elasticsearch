@@ -171,7 +171,7 @@ func (c *Controller) ensureElasticsearchNodeVersion2(es *api.Elasticsearch) (*ap
 		return nil, kutil.VerbUnchanged, errors.New("Elasticsearch object is empty")
 	}
 
-	elastic, err := distribution.GetElasticsearch(c.Client, c.ExtClient, es)
+	elastic, err := distribution.NewElasticsearch(c.Client, c.ExtClient, es)
 	if err != nil {
 		return nil, kutil.VerbUnchanged, errors.Wrap(err, "failed to get elasticsearch distribution")
 	}
@@ -189,12 +189,12 @@ func (c *Controller) ensureElasticsearchNodeVersion2(es *api.Elasticsearch) (*ap
 	}
 
 	// Ensure Service account, role, rolebinding, and PSP for database statefulsets
-	if err := c.ensureDatabaseRBAC(elastic.GetElasticsearch()); err != nil {
+	if err := c.ensureDatabaseRBAC(elastic.UpdatedElasticsearch()); err != nil {
 		return nil, kutil.VerbUnchanged, errors.Wrap(err, "failed to create RBAC role or roleBinding")
 	}
 
 	vt := kutil.VerbUnchanged
-	topology := elastic.GetElasticsearch().Spec.Topology
+	topology := elastic.UpdatedElasticsearch().Spec.Topology
 	if topology != nil {
 		vt1, err := elastic.EnsureClientNodes()
 		if err != nil {
@@ -224,7 +224,7 @@ func (c *Controller) ensureElasticsearchNodeVersion2(es *api.Elasticsearch) (*ap
 	// Need some time to build elasticsearch cluster. Nodes will communicate with each other
 	time.Sleep(time.Second * 30)
 
-	return elastic.GetElasticsearch(), vt, nil
+	return elastic.UpdatedElasticsearch(), vt, nil
 }
 
 func (c *Controller) ensureElasticsearchNode(elasticsearch *api.Elasticsearch) (kutil.VerbType, error) {

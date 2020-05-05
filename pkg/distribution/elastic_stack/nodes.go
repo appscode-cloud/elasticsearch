@@ -293,7 +293,7 @@ func (es *Elasticsearch) EnsureCombinedNode() (kutil.VerbType, error) {
 
 	// Environment variable list for main container.
 	// These are node specific, i.e. changes depending on node type.
-	// Following are for Master node:
+	// Followings are for Combined node:
 	envList := []corev1.EnvVar{
 		{
 			Name:  "ES_JAVA_OPTS",
