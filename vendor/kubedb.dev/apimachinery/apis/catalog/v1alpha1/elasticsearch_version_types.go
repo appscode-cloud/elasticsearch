@@ -109,4 +109,5 @@ const (
 	ElasticsearchAuthPluginSearchGuard ElasticsearchAuthPlugin = "SearchGuard"
 	ElasticsearchAuthPluginNone        ElasticsearchAuthPlugin = "None" // deprecated
 	ElasticsearchAuthPluginXpack       ElasticsearchAuthPlugin = "X-Pack"
+	ElasticsearchAuthPluginOpenDistro  ElasticsearchAuthPlugin = "OpenDistro"
 )

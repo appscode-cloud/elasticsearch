@@ -13,7 +13,7 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 */
-package elastic_stack
+package open_distro
 
 import (
 	"fmt"
@@ -91,7 +91,7 @@ func (es *Elasticsearch) EnsureMasterNodes() (kutil.VerbType, error) {
 	// These Env are only required for master nodes to bootstrap
 	// for the vary first time. Need to remove from EnvList as
 	// soon as the cluster is up and running.
-	if strings.HasPrefix(es.esVersion.Spec.Version, "7.") {
+	if strings.HasPrefix(es.esVersion.Spec.Version, "1.") {
 		envList = core_util.UpsertEnvVars(envList, corev1.EnvVar{
 			Name:  "cluster.initial_master_nodes",
 			Value: es.getInitialMasterNodes(),
@@ -372,8 +372,8 @@ func (es *Elasticsearch) getCombinedNode() *api.ElasticsearchNode {
 
 // Ref:
 //	- https://www.elastic.co/guide/en/elasticsearch/reference/7.6/heap-size.html#heap-size
-//	- no more than 50% of your physical RAM
-//	- no more than 32GB that the JVM uses for compressed object pointers (compressed oops)
+//  - no more than 50% of your physical RAM
+//  - no more than 32GB that the JVM uses for compressed object pointers (compressed oops)
 // 	- no more than 26GB for zero-based compressed oops;
 func getHeapSizeForNode(val int64) int64 {
 	// no more than 50% of main memory (RAM)
