@@ -207,6 +207,16 @@ func (es *Elasticsearch) getVolumes2(esNode *api.ElasticsearchNode) ([]corev1.Vo
 	var volumes []corev1.Volume
 	var pvc *corev1.PersistentVolumeClaim
 
+	secretName := fmt.Sprintf("%v-%v", es.elasticsearch.OffshootName(), DatabaseConfigMapSuffix)
+	volumes = core_util.UpsertVolume(volumes, corev1.Volume{
+		Name: "temp-esconfig",
+		VolumeSource: corev1.VolumeSource{
+			Secret: &corev1.SecretVolumeSource{
+				SecretName: secretName,
+			},
+		},
+	})
+
 	// Upsert Volume for configuration directory
 
 	// Upsert Volume for the default configuration provided for x-pack.
@@ -447,6 +457,11 @@ func (es *Elasticsearch) getContainers2(esNode *api.ElasticsearchNode, envList [
 		{
 			Name:      "data",
 			MountPath: DataDir,
+		},
+		{
+			Name:      "temp-esconfig",
+			MountPath: filepath.Join(SecurityConfigPath, InternalUserFileName),
+			SubPath:   InternalUserFileName,
 		},
 	}
 
@@ -737,9 +752,31 @@ func (es *Elasticsearch) upsertContainerEnv(envList []corev1.EnvVar) []corev1.En
 			Name:  "network.host",
 			Value: "0.0.0.0",
 		},
+		{
+			Name: "ELASTIC_USER",
+			ValueFrom: &corev1.EnvVarSource{
+				SecretKeyRef: &corev1.SecretKeySelector{
+					LocalObjectReference: corev1.LocalObjectReference{
+						Name: es.elasticsearch.Spec.DatabaseSecret.SecretName,
+					},
+					Key: KeyAdminUserName,
+				},
+			},
+		},
+		{
+			Name: "ELASTIC_PASSWORD",
+			ValueFrom: &corev1.EnvVarSource{
+				SecretKeyRef: &corev1.SecretKeySelector{
+					LocalObjectReference: corev1.LocalObjectReference{
+						Name: es.elasticsearch.Spec.DatabaseSecret.SecretName,
+					},
+					Key: KeyAdminPassword,
+				},
+			},
+		},
 	}...)
 
-	if strings.HasPrefix(es.esVersion.Spec.Version, "7.") {
+	if strings.HasPrefix(es.esVersion.Spec.Version, "1.") {
 		envList = core_util.UpsertEnvVars(envList, corev1.EnvVar{
 			Name:  "discovery.seed_hosts",
 			Value: es.elasticsearch.MasterServiceName(),

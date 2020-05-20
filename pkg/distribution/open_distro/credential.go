@@ -19,6 +19,8 @@ package open_distro
 import (
 	"fmt"
 
+	"golang.org/x/crypto/bcrypt"
+
 	api "kubedb.dev/apimachinery/apis/kubedb/v1alpha1"
 	"kubedb.dev/apimachinery/client/clientset/versioned/typed/kubedb/v1alpha1/util"
 
@@ -107,4 +109,14 @@ func (es *Elasticsearch) findDatabaseSecret() (*corev1.Secret, error) {
 	}
 
 	return secret, nil
+}
+
+func generateRandomPassword() (string, error) {
+	pass, err := bcrypt.GenerateFromPassword([]byte("password"), 12)
+	if err != nil {
+		return "", err
+	}
+	fmt.Println(string(pass))
+	err = bcrypt.CompareHashAndPassword(pass, []byte("passord"))
+	fmt.Println(err)
 }
