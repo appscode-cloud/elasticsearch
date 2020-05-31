@@ -20,6 +20,8 @@ import (
 
 	api "kubedb.dev/apimachinery/apis/kubedb/v1alpha1"
 
+	"github.com/pkg/errors"
+	"golang.org/x/crypto/bcrypt"
 	corev1 "k8s.io/api/core/v1"
 	kerr "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -35,7 +37,7 @@ const (
 	InternalUserFileName    = "internal_users.yml"
 )
 
-var internal_user_config = `
+var internalUserConfigFile = `
 ---
 # This is the internal user database
 # The hash value is a bcrypt hash and can be generated with plugin/tools/hash.sh
@@ -61,7 +63,7 @@ kibanaserver:
 ## Demo users
 
 kibanaro:
-  hash: "$2a$12$JJSXNfTowz7Uu5ttXfeYpeYE0arACvcwlPBStB1F.MI7f0U9Z4DGC"
+  hash: "%s"
   reserved: false
   backend_roles:
   - "kibanauser"
@@ -73,21 +75,21 @@ kibanaro:
   description: "Demo kibanaro user"
 
 logstash:
-  hash: "$2a$12$u1ShR4l4uBS3Uv59Pa2y5.1uQuZBrZtmNfqB3iM/.jL0XoV9sghS2"
+  hash: "%s"
   reserved: false
   backend_roles:
   - "logstash"
   description: "Demo logstash user"
 
 readall:
-  hash: "$2a$12$ae4ycwzwvLtZxwZ82RmiEunBbIPiAmGZduBAjKN0TXdwQFtCwARz2"
+  hash: "%s"
   reserved: false
   backend_roles:
   - "readall"
   description: "Demo readall user"
 
 snapshotrestore:
-  hash: "$2y$12$DpwmetHKwgYnorbgdvORCenv4NAK8cPUg8AI6pxLCuWf/ALc0.v7W"
+  hash: "%s"
   reserved: false
   backend_roles:
   - "snapshotrestore"
@@ -123,12 +125,16 @@ func (es *Elasticsearch) EnsureDefaultConfig() error {
 	// let, elasticsearch object be the owner.
 	owner := metav1.NewControllerRef(es.elasticsearch, api.SchemeGroupVersion.WithKind(api.ResourceKindElasticsearch))
 
-	// password for default users: admin
-	internalUserConfig := fmt.Sprintf(internal_user_config, "ska", "skfdj")
-	data := map[string][]byte{
-		InternalUserFileName: []byte(internalUserConfig),
+	// password for default users: admin, kibanaserver
+	inUserConfig, err := es.getInternalUserConfig()
+	if err != nil {
+		return errors.Wrap(err, "failed to generate default internal user config")
 	}
-	_, _, err := core_util.CreateOrPatchSecret(es.kClient, secretMeta, func(in *corev1.Secret) *corev1.Secret {
+
+	data := map[string][]byte{
+		InternalUserFileName: []byte(inUserConfig),
+	}
+	_, _, err = core_util.CreateOrPatchSecret(es.kClient, secretMeta, func(in *corev1.Secret) *corev1.Secret {
 		in.Labels = core_util.UpsertMap(in.Labels, es.elasticsearch.OffshootLabels())
 		core_util.EnsureOwnerReference(&in.ObjectMeta, owner)
 		in.Data = data
@@ -156,4 +162,74 @@ func (es *Elasticsearch) findDefaultConfig() error {
 	}
 
 	return nil
+}
+
+func (es *Elasticsearch) getInternalUserConfig() (string, error) {
+	dbSecret := es.elasticsearch.Spec.DatabaseSecret
+	if dbSecret == nil {
+		return "", errors.New("database secret is empty")
+	}
+
+	secret, err := es.kClient.CoreV1().Secrets(es.elasticsearch.GetNamespace()).Get(dbSecret.SecretName, metav1.GetOptions{})
+	if err != nil {
+		return "", errors.Wrap(err, "failed to get database secret")
+	}
+
+	adminPH, err := generatePasswordHash("admin")
+	if err != nil {
+		return "", err
+	}
+	if value, ok := secret.Data[KeyAdminPassword]; ok {
+		adminPH, err = generatePasswordHash(string(value))
+		if err != nil {
+			return "", err
+		}
+	}
+
+	kibanaserverPH, err := generatePasswordHash("kibanaserver")
+	if err != nil {
+		return "", err
+	}
+	if value, ok := secret.Data[KeyKibanaServerPassword]; ok {
+		kibanaserverPH, err = generatePasswordHash(string(value))
+		if err != nil {
+			return "", err
+		}
+	}
+
+	kibanaroPH, err := generatePasswordHash("kibanaro")
+	if err != nil {
+		return "", nil
+	}
+
+	logstashPH, err := generatePasswordHash("logstash")
+	if err != nil {
+		return "", nil
+	}
+
+	readallPH, err := generatePasswordHash("readall")
+	if err != nil {
+		return "", nil
+	}
+
+	snapshotrestorePH, err := generatePasswordHash("snapshotrestore")
+	if err != nil {
+		return "", nil
+	}
+
+	return fmt.Sprintf(internalUserConfigFile,
+		adminPH,
+		kibanaserverPH,
+		kibanaroPH,
+		logstashPH,
+		readallPH,
+		snapshotrestorePH), nil
+}
+
+func generatePasswordHash(password string) (string, error) {
+	pHash, err := bcrypt.GenerateFromPassword([]byte(password), 12)
+	if err != nil {
+		return "", err
+	}
+	return string(pHash), nil
 }

@@ -19,8 +19,6 @@ package open_distro
 import (
 	"fmt"
 
-	"golang.org/x/crypto/bcrypt"
-
 	api "kubedb.dev/apimachinery/apis/kubedb/v1alpha1"
 	"kubedb.dev/apimachinery/client/clientset/versioned/typed/kubedb/v1alpha1/util"
 
@@ -31,9 +29,12 @@ import (
 )
 
 const (
-	ElasticUser      = "elastic"
-	KeyAdminUserName = "ADMIN_USERNAME"
-	KeyAdminPassword = "ADMIN_PASSWORD"
+	AdminUser               = "admin"
+	KibanaserverUser        = "kibanaserver"
+	KeyAdminUserName        = "ADMIN_USERNAME"
+	KeyAdminPassword        = "ADMIN_PASSWORD"
+	KeyKibanaServerUserName = "KIBANASERVER_USERNAME"
+	KeyKibanaServerPassword = "KIBANASERVER_PASSWORD"
 )
 
 func (es *Elasticsearch) EnsureDatabaseSecret() error {
@@ -68,9 +69,12 @@ func (es *Elasticsearch) createDatabaseSecret() (*corev1.SecretVolumeSource, err
 	}
 
 	adminPassword := rand.Characters(8)
+	kibanaPassword := rand.Characters(8)
 	var data = map[string][]byte{
-		KeyAdminUserName: []byte(ElasticUser),
-		KeyAdminPassword: []byte(adminPassword),
+		KeyAdminUserName:        []byte(AdminUser),
+		KeyAdminPassword:        []byte(adminPassword),
+		KeyKibanaServerUserName: []byte(KibanaserverUser),
+		KeyKibanaServerPassword: []byte(kibanaPassword),
 	}
 
 	name := fmt.Sprintf("%v-auth", es.elasticsearch.OffshootName())
@@ -109,14 +113,4 @@ func (es *Elasticsearch) findDatabaseSecret() (*corev1.Secret, error) {
 	}
 
 	return secret, nil
-}
-
-func generateRandomPassword() (string, error) {
-	pass, err := bcrypt.GenerateFromPassword([]byte("password"), 12)
-	if err != nil {
-		return "", err
-	}
-	fmt.Println(string(pass))
-	err = bcrypt.CompareHashAndPassword(pass, []byte("passord"))
-	fmt.Println(err)
 }
