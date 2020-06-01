@@ -16,6 +16,8 @@ limitations under the License.
 package elastic_stack
 
 import (
+	"context"
+
 	"github.com/pkg/errors"
 	appsv1 "k8s.io/api/apps/v1"
 	policyv1beta1 "k8s.io/api/policy/v1beta1"
@@ -35,7 +37,7 @@ func (es *Elasticsearch) createPodDisruptionBudget(sts *appsv1.StatefulSet, maxU
 		Name:      sts.Name,
 		Namespace: sts.Namespace,
 	}
-	_, _, err := policy_util.CreateOrPatchPodDisruptionBudget(es.kClient, m,
+	_, _, err := policy_util.CreateOrPatchPodDisruptionBudget(context.TODO(), es.kClient, m,
 		func(in *policyv1beta1.PodDisruptionBudget) *policyv1beta1.PodDisruptionBudget {
 			in.Labels = sts.Labels
 
@@ -47,6 +49,6 @@ func (es *Elasticsearch) createPodDisruptionBudget(sts *appsv1.StatefulSet, maxU
 			in.Spec.MaxUnavailable = maxUnavailable
 			in.Spec.MinAvailable = nil
 			return in
-		})
+		}, metav1.PatchOptions{})
 	return err
 }

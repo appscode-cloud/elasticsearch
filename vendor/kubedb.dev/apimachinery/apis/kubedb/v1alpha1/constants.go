@@ -48,12 +48,10 @@ const (
 	JobTypeBackup  = "backup"
 	JobTypeRestore = "restore"
 
-	ElasticsearchRestPort        = 9200
-	ElasticsearchRestPortName    = "http"
-	ElasticsearchNodePort        = 9300
-	ElasticsearchNodePortName    = "transport"
-	ElasticsearchMetricsPort     = 9600
-	ElasticsearchMetricsPortName = "metrics"
+	ElasticsearchRestPort     = 9200
+	ElasticsearchRestPortName = "http"
+	ElasticsearchNodePort     = 9300
+	ElasticsearchNodePortName = "transport"
 
 	MongoDBShardPort                  = 27017
 	MongoDBConfigdbPort               = 27017

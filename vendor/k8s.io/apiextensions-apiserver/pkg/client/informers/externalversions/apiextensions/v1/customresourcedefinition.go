@@ -19,7 +19,6 @@ limitations under the License.
 package v1
 
 import (
-	"context"
 	time "time"
 
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
@@ -61,13 +60,13 @@ func NewFilteredCustomResourceDefinitionInformer(client clientset.Interface, res
 				if tweakListOptions != nil {
 					tweakListOptions(&options)
 				}
-				return client.ApiextensionsV1().CustomResourceDefinitions().List(context.TODO(), options)
+				return client.ApiextensionsV1().CustomResourceDefinitions().List(options)
 			},
 			WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
 				if tweakListOptions != nil {
 					tweakListOptions(&options)
 				}
-				return client.ApiextensionsV1().CustomResourceDefinitions().Watch(context.TODO(), options)
+				return client.ApiextensionsV1().CustomResourceDefinitions().Watch(options)
 			},
 		},
 		&apiextensionsv1.CustomResourceDefinition{},

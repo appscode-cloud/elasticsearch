@@ -438,10 +438,7 @@ func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenA
 		"kubedb.dev/apimachinery/apis/catalog/v1alpha1.RedisVersionList":                      schema_apimachinery_apis_catalog_v1alpha1_RedisVersionList(ref),
 		"kubedb.dev/apimachinery/apis/catalog/v1alpha1.RedisVersionPodSecurityPolicy":         schema_apimachinery_apis_catalog_v1alpha1_RedisVersionPodSecurityPolicy(ref),
 		"kubedb.dev/apimachinery/apis/catalog/v1alpha1.RedisVersionSpec":                      schema_apimachinery_apis_catalog_v1alpha1_RedisVersionSpec(ref),
-<<<<<<< HEAD
 		"kubedb.dev/apimachinery/apis/catalog/v1alpha1.Whitelist":                             schema_apimachinery_apis_catalog_v1alpha1_Whitelist(ref),
-=======
->>>>>>> Refactor codebase
 	}
 }
 

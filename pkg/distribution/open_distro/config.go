@@ -16,6 +16,7 @@ limitations under the License.
 package open_distro
 
 import (
+	"context"
 	"fmt"
 
 	api "kubedb.dev/apimachinery/apis/kubedb/v1alpha1"
@@ -134,12 +135,12 @@ func (es *Elasticsearch) EnsureDefaultConfig() error {
 	data := map[string][]byte{
 		InternalUserFileName: []byte(inUserConfig),
 	}
-	_, _, err = core_util.CreateOrPatchSecret(es.kClient, secretMeta, func(in *corev1.Secret) *corev1.Secret {
+	_, _, err = core_util.CreateOrPatchSecret(context.TODO(), es.kClient, secretMeta, func(in *corev1.Secret) *corev1.Secret {
 		in.Labels = core_util.UpsertMap(in.Labels, es.elasticsearch.OffshootLabels())
 		core_util.EnsureOwnerReference(&in.ObjectMeta, owner)
 		in.Data = data
 		return in
-	})
+	}, metav1.PatchOptions{})
 
 	return err
 }
@@ -147,7 +148,7 @@ func (es *Elasticsearch) EnsureDefaultConfig() error {
 func (es *Elasticsearch) findDefaultConfig() error {
 	cmName := fmt.Sprintf("%v-%v", es.elasticsearch.OffshootName(), DatabaseConfigMapSuffix)
 
-	configMap, err := es.kClient.CoreV1().ConfigMaps(es.elasticsearch.Namespace).Get(cmName, metav1.GetOptions{})
+	configMap, err := es.kClient.CoreV1().ConfigMaps(es.elasticsearch.Namespace).Get(context.TODO(), cmName, metav1.GetOptions{})
 	if err != nil {
 		if kerr.IsNotFound(err) {
 			return nil
@@ -170,7 +171,7 @@ func (es *Elasticsearch) getInternalUserConfig() (string, error) {
 		return "", errors.New("database secret is empty")
 	}
 
-	secret, err := es.kClient.CoreV1().Secrets(es.elasticsearch.GetNamespace()).Get(dbSecret.SecretName, metav1.GetOptions{})
+	secret, err := es.kClient.CoreV1().Secrets(es.elasticsearch.GetNamespace()).Get(context.TODO(), dbSecret.SecretName, metav1.GetOptions{})
 	if err != nil {
 		return "", errors.Wrap(err, "failed to get database secret")
 	}

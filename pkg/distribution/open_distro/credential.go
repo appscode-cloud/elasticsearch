@@ -17,6 +17,7 @@ limitations under the License.
 package open_distro
 
 import (
+	"context"
 	"fmt"
 
 	api "kubedb.dev/apimachinery/apis/kubedb/v1alpha1"
@@ -44,10 +45,10 @@ func (es *Elasticsearch) EnsureDatabaseSecret() error {
 		if databaseSecretVolume, err = es.createDatabaseSecret(); err != nil {
 			return err
 		}
-		newES, _, err := util.PatchElasticsearch(es.extClient.KubedbV1alpha1(), es.elasticsearch, func(in *api.Elasticsearch) *api.Elasticsearch {
+		newES, _, err := util.PatchElasticsearch(context.TODO(), es.extClient.KubedbV1alpha1(), es.elasticsearch, func(in *api.Elasticsearch) *api.Elasticsearch {
 			in.Spec.DatabaseSecret = databaseSecretVolume
 			return in
-		})
+		}, metav1.PatchOptions{})
 		if err != nil {
 			return err
 		}
@@ -87,7 +88,7 @@ func (es *Elasticsearch) createDatabaseSecret() (*corev1.SecretVolumeSource, err
 		Data: data,
 	}
 
-	if _, err := es.kClient.CoreV1().Secrets(es.elasticsearch.Namespace).Create(secret); err != nil {
+	if _, err := es.kClient.CoreV1().Secrets(es.elasticsearch.Namespace).Create(context.TODO(), secret, metav1.CreateOptions{}); err != nil {
 		return nil, err
 	}
 
@@ -98,7 +99,7 @@ func (es *Elasticsearch) createDatabaseSecret() (*corev1.SecretVolumeSource, err
 
 func (es *Elasticsearch) findDatabaseSecret() (*corev1.Secret, error) {
 	name := fmt.Sprintf("%v-auth", es.elasticsearch.OffshootName())
-	secret, err := es.kClient.CoreV1().Secrets(es.elasticsearch.Namespace).Get(name, metav1.GetOptions{})
+	secret, err := es.kClient.CoreV1().Secrets(es.elasticsearch.Namespace).Get(context.TODO(), name, metav1.GetOptions{})
 	if err != nil {
 		if kerr.IsNotFound(err) {
 			return nil, nil

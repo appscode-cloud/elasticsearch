@@ -16,6 +16,7 @@ limitations under the License.
 package open_distro
 
 import (
+	"context"
 	"fmt"
 	"io/ioutil"
 	"os"
@@ -43,10 +44,10 @@ func (es *Elasticsearch) EnsureCertSecret() error {
 		if certSecretVolumeSource, err = es.createCertSecret(); err != nil {
 			return err
 		}
-		newES, _, err := util.PatchElasticsearch(es.extClient.KubedbV1alpha1(), es.elasticsearch, func(in *api.Elasticsearch) *api.Elasticsearch {
+		newES, _, err := util.PatchElasticsearch(context.TODO(), es.extClient.KubedbV1alpha1(), es.elasticsearch, func(in *api.Elasticsearch) *api.Elasticsearch {
 			in.Spec.CertificateSecret = certSecretVolumeSource
 			return in
-		})
+		}, metav1.PatchOptions{})
 		if err != nil {
 			return err
 		}
@@ -119,7 +120,7 @@ func (es *Elasticsearch) createCertSecret() (*corev1.SecretVolumeSource, error) 
 			"key_pass": pass,
 		},
 	}
-	if _, err := es.kClient.CoreV1().Secrets(es.elasticsearch.Namespace).Create(secret); err != nil {
+	if _, err := es.kClient.CoreV1().Secrets(es.elasticsearch.Namespace).Create(context.TODO(), secret, metav1.CreateOptions{}); err != nil {
 		return nil, err
 	}
 
@@ -133,7 +134,7 @@ func (es *Elasticsearch) createCertSecret() (*corev1.SecretVolumeSource, error) 
 func (es *Elasticsearch) findCertSecret() (*corev1.Secret, error) {
 	name := fmt.Sprintf("%v-cert", es.elasticsearch.OffshootName())
 
-	secret, err := es.kClient.CoreV1().Secrets(es.elasticsearch.Namespace).Get(name, metav1.GetOptions{})
+	secret, err := es.kClient.CoreV1().Secrets(es.elasticsearch.Namespace).Get(context.TODO(), name, metav1.GetOptions{})
 	if err != nil {
 		if kerr.IsNotFound(err) {
 			return nil, nil

@@ -1,6 +1,7 @@
 package open_distro
 
 import (
+	"context"
 	"fmt"
 	"testing"
 
@@ -47,13 +48,13 @@ func TestElasticsearch_getInternalUserConfig(t *testing.T) {
 				kClient:       tt.fields.kClient,
 				elasticsearch: tt.fields.elasticsearch,
 			}
-			_, err := es.kClient.CoreV1().Secrets(es.elasticsearch.Namespace).Create(&corev1.Secret{
+			_, err := es.kClient.CoreV1().Secrets(es.elasticsearch.Namespace).Create(context.TODO(), &corev1.Secret{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "db-secret",
 					Namespace: es.elasticsearch.Namespace,
 				},
 				Data: map[string][]byte{},
-			})
+			}, metav1.CreateOptions{})
 			if err != nil {
 				panic(err)
 			}

@@ -16,6 +16,7 @@ limitations under the License.
 package elastic_stack
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"path/filepath"
@@ -119,7 +120,7 @@ func (es *Elasticsearch) ensureStatefulSet(
 		return kutil.VerbUnchanged, errors.Wrap(err, "failed to get volumes")
 	}
 
-	statefulSet, vt, err := app_util.CreateOrPatchStatefulSet(es.kClient, statefulSetMeta, func(in *appsv1.StatefulSet) *appsv1.StatefulSet {
+	statefulSet, vt, err := app_util.CreateOrPatchStatefulSet(context.TODO(), es.kClient, statefulSetMeta, func(in *appsv1.StatefulSet) *appsv1.StatefulSet {
 		in.Labels = core_util.UpsertMap(labels, es.elasticsearch.OffshootLabels())
 		in.Annotations = es.elasticsearch.Spec.PodTemplate.Controller.Annotations
 		core_util.EnsureOwnerReference(&in.ObjectMeta, owner)
@@ -169,7 +170,7 @@ func (es *Elasticsearch) ensureStatefulSet(
 		}
 
 		return in
-	})
+	}, metav1.PatchOptions{})
 
 	if err != nil {
 		return kutil.VerbUnchanged, errors.Wrap(err, "failed to create or patch statefulset")
@@ -215,7 +216,7 @@ func (es *Elasticsearch) getVolumes(esNode *api.ElasticsearchNode) ([]corev1.Vol
 	// from config-merger initContainer.
 	if !es.elasticsearch.Spec.DisableSecurity {
 		cmName := fmt.Sprintf("%v-%v", es.elasticsearch.OffshootName(), DatabaseConfigMapSuffix)
-		_, err := es.kClient.CoreV1().ConfigMaps(es.elasticsearch.GetNamespace()).Get(cmName, metav1.GetOptions{})
+		_, err := es.kClient.CoreV1().ConfigMaps(es.elasticsearch.GetNamespace()).Get(context.TODO(), cmName, metav1.GetOptions{})
 		if err != nil {
 			return nil, nil, errors.Wrap(err, fmt.Sprintf("failed to get configmap: %s/%s", es.elasticsearch.GetNamespace(), cmName))
 		}
@@ -531,7 +532,7 @@ func (es *Elasticsearch) checkStatefulSet(sName string) error {
 	elasticsearchName := es.elasticsearch.OffshootName()
 
 	// StatefulSet for Elasticsearch database
-	statefulSet, err := es.kClient.AppsV1().StatefulSets(es.elasticsearch.Namespace).Get(sName, metav1.GetOptions{})
+	statefulSet, err := es.kClient.AppsV1().StatefulSets(es.elasticsearch.Namespace).Get(context.TODO(), sName, metav1.GetOptions{})
 	if err != nil {
 		if kerr.IsNotFound(err) {
 			return nil
@@ -626,7 +627,7 @@ func (es *Elasticsearch) upsertContainerEnv(envList []corev1.EnvVar) []corev1.En
 }
 
 func (es *Elasticsearch) checkStatefulSetPodStatus(statefulSet *appsv1.StatefulSet) error {
-	err := core_util.WaitUntilPodRunningBySelector(
+	err := core_util.WaitUntilPodRunningBySelector(context.TODO(),
 		es.kClient,
 		statefulSet.Namespace,
 		statefulSet.Spec.Selector,
