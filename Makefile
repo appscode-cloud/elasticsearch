@@ -425,8 +425,9 @@ check-license:
 		$(BUILD_IMAGE)                                   \
 		ltag -t "./hack/license" --excludes "vendor contrib third_party libbuild" --check -v
 
+# TODO: skipping lint for testing purpose
 .PHONY: ci
-ci: verify check-license lint build unit-tests #cover
+ci: verify check-license build unit-tests #cover
 
 .PHONY: qa
 qa:
