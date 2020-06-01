@@ -16,6 +16,7 @@ limitations under the License.
 package distribution
 
 import (
+	"context"
 	"fmt"
 
 	catalog "kubedb.dev/apimachinery/apis/catalog/v1alpha1"
@@ -42,7 +43,7 @@ func NewElasticsearch(kc kubernetes.Interface, extClient cs.Interface, es *api.E
 	}
 
 	v := es.Spec.Version
-	esVersion, err := extClient.CatalogV1alpha1().ElasticsearchVersions().Get(v, metav1.GetOptions{})
+	esVersion, err := extClient.CatalogV1alpha1().ElasticsearchVersions().Get(context.TODO(), v, metav1.GetOptions{})
 	if err != nil {
 		return nil, errors.Wrap(err, fmt.Sprintf("failed to get elasticsearchVersion: %s", v))
 	}
