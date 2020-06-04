@@ -152,7 +152,6 @@ func (es *Elasticsearch) ensureStatefulSet(
 		in.Spec.Template.Spec.Priority = es.elasticsearch.Spec.PodTemplate.Spec.Priority
 		in.Spec.Template.Spec.SecurityContext = es.elasticsearch.Spec.PodTemplate.Spec.SecurityContext
 
-		// securityContext for x-pack
 		if in.Spec.Template.Spec.SecurityContext == nil {
 			in.Spec.Template.Spec.SecurityContext = &corev1.PodSecurityContext{
 				FSGroup: types.Int64P(1000),
@@ -208,6 +207,8 @@ func (es *Elasticsearch) getVolumes2(esNode *api.ElasticsearchNode) ([]corev1.Vo
 	var volumes []corev1.Volume
 	var pvc *corev1.PersistentVolumeClaim
 
+	// Default configuration files, will be stored in a temporary directory.
+	// i.e. "/elasticsearch/temp-config"
 	secretName := fmt.Sprintf("%v-%v", es.elasticsearch.OffshootName(), DatabaseConfigMapSuffix)
 	volumes = core_util.UpsertVolume(volumes, corev1.Volume{
 		Name: "temp-esconfig",
@@ -218,7 +219,16 @@ func (es *Elasticsearch) getVolumes2(esNode *api.ElasticsearchNode) ([]corev1.Vo
 		},
 	})
 
-	// Upsert Volume for configuration directory
+	// Default security-config files will be merged
+	// with user provided security-config files(if any) from "config-merger" init container
+	// and later those files will be mounted on this shared volume so that elaticsearch container
+	// can use them.
+	volumes = core_util.UpsertVolume(volumes, corev1.Volume{
+		Name: "security-config",
+		VolumeSource: corev1.VolumeSource{
+			EmptyDir: &corev1.EmptyDirVolumeSource{},
+		},
+	})
 
 	// Upsert Volume for the default configuration provided for x-pack.
 	// This configuration will also be copied as default elasticsearch configuration (i.e. elasticsearch.yaml)
@@ -460,9 +470,8 @@ func (es *Elasticsearch) getContainers2(esNode *api.ElasticsearchNode, envList [
 			MountPath: DataDir,
 		},
 		{
-			Name:      "temp-esconfig",
-			MountPath: filepath.Join(SecurityConfigPath, InternalUserFileName),
-			SubPath:   InternalUserFileName,
+			Name:      "security-config",
+			MountPath: SecurityConfigFileMountPath,
 		},
 	}
 
@@ -592,34 +601,19 @@ func (es *Elasticsearch) getInitContainers(esNode *api.ElasticsearchNode, envLis
 		},
 	}
 
-	initContainers = es.upsertConfigMergerInitContainer2(initContainers, envList)
+	initContainers = es.upsertConfigMergerInitContainer(initContainers, envList)
 	return initContainers, nil
-}
-
-func (es *Elasticsearch) upsertConfigMergerInitContainer2(initCon []corev1.Container, envList []corev1.EnvVar) []corev1.Container {
-	fixmountCont := corev1.Container{
-		Name:    "fixmount",
-		Image:   es.esVersion.Spec.InitContainer.Image,
-		Command: []string{"sh"},
-		Args: []string{
-			"-c",
-			"chown -R 1000:1000 /usr/share/elasticsearch/data",
-		},
-		VolumeMounts: []corev1.VolumeMount{
-			{
-				Name:      "data",
-				MountPath: DataDir,
-			},
-		},
-	}
-	return append(initCon, fixmountCont)
 }
 
 func (es *Elasticsearch) upsertConfigMergerInitContainer(initCon []corev1.Container, envList []corev1.EnvVar) []corev1.Container {
 	volumeMounts := []corev1.VolumeMount{
 		{
-			Name:      "esconfig",
-			MountPath: ConfigFileMountPath,
+			Name:      "temp-esconfig",
+			MountPath: TempConfigFileMountPath,
+		},
+		{
+			Name:      "security-config",
+			MountPath: SecurityConfigFileMountPath,
 		},
 		{
 			Name:      "data",
@@ -635,80 +629,12 @@ func (es *Elasticsearch) upsertConfigMergerInitContainer(initCon []corev1.Contai
 		})
 	}
 
-	if !es.elasticsearch.Spec.DisableSecurity {
-		volumeMounts = append(volumeMounts, corev1.VolumeMount{
-			Name:      "temp-esconfig",
-			MountPath: TempConfigFileMountPath,
-		})
-	}
-
 	configMerger := corev1.Container{
 		Name:            ConfigMergerInitContainerName,
 		Image:           es.esVersion.Spec.InitContainer.YQImage,
 		ImagePullPolicy: corev1.PullIfNotPresent,
-		Command:         []string{"sh"},
 		Env:             envList,
-		Args: []string{
-			"-c",
-			`set -x
-echo "changing ownership of data folder: /usr/share/elasticsearch/data"
-chown -R 1000:1000 /usr/share/elasticsearch/data
-
-TEMP_CONFIG_FILE=/elasticsearch/temp-config/elasticsearch.yml
-CUSTOM_CONFIG_DIR="/elasticsearch/custom-config"
-CONFIG_FILE=/usr/share/elasticsearch/config/elasticsearch.yml
-
-if [ -f $TEMP_CONFIG_FILE ]; then
-  cp $TEMP_CONFIG_FILE $CONFIG_FILE
-else
-  touch $CONFIG_FILE
-fi
-
-# yq changes the file permissions after merging custom configuration.
-# we need to restore the original permissions after merging done.
-ORIGINAL_PERMISSION=$(stat -c '%a' $CONFIG_FILE)
-
-# if common-config file exist then apply it
-if [ -f $CUSTOM_CONFIG_DIR/common-config.yml ]; then
-  yq merge -i --overwrite $CONFIG_FILE $CUSTOM_CONFIG_DIR/common-config.yml
-elif [ -f $CUSTOM_CONFIG_DIR/common-config.yaml ]; then
-  yq merge -i --overwrite $CONFIG_FILE $CUSTOM_CONFIG_DIR/common-config.yaml
-fi
-
-# if it is data node and data-config file exist then apply it
-if [[ "$NODE_DATA" == true ]]; then
-  if [ -f $CUSTOM_CONFIG_DIR/data-config.yml ]; then
-    yq merge -i --overwrite $CONFIG_FILE $CUSTOM_CONFIG_DIR/data-config.yml
-  elif [ -f $CUSTOM_CONFIG_DIR/data-config.yaml ]; then
-    yq merge -i --overwrite $CONFIG_FILE $CUSTOM_CONFIG_DIR/data-config.yaml
-  fi
-fi
-
-# if it is client node and client-config file exist then apply it
-if [[ "$NODE_INGEST" == true ]]; then
-  if [ -f $CUSTOM_CONFIG_DIR/client-config.yml ]; then
-    yq merge -i --overwrite $CONFIG_FILE $CUSTOM_CONFIG_DIR/client-config.yml
-  elif [ -f $CUSTOM_CONFIG_DIR/client-config.yaml ]; then
-    yq merge -i --overwrite $CONFIG_FILE $CUSTOM_CONFIG_DIR/client-config.yaml
-  fi
-fi
-
-# if it is master node and mater-config file exist then apply it
-if [[ "$NODE_MASTER" == true ]]; then
-  if [ -f $CUSTOM_CONFIG_DIR/master-config.yml ]; then
-    yq merge -i --overwrite $CONFIG_FILE $CUSTOM_CONFIG_DIR/master-config.yml
-  elif [ -f $CUSTOM_CONFIG_DIR/master-config.yaml ]; then
-    yq merge -i --overwrite $CONFIG_FILE $CUSTOM_CONFIG_DIR/master-config.yaml
-  fi
-fi
-
-# restore original permission of elasticsearh.yml file
-if [[ "$ORIGINAL_PERMISSION" != "" ]]; then
-  chmod $ORIGINAL_PERMISSION $CONFIG_FILE
-fi
-`,
-		},
-		VolumeMounts: volumeMounts,
+		VolumeMounts:    volumeMounts,
 	}
 
 	return append(initCon, configMerger)

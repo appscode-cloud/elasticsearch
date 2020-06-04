@@ -30,71 +30,33 @@ import (
 )
 
 const (
-	ConfigFileName          = "elasticsearch.yml"
-	ConfigFileMountPath     = "/usr/share/elasticsearch/config"
-	TempConfigFileMountPath = "/elasticsearch/temp-config"
-	DatabaseConfigMapSuffix = "config"
-	SecurityConfigPath      = "/usr/share/elasticsearch/plugins/opendistro_security/securityconfig"
-	InternalUserFileName    = "internal_users.yml"
+	ConfigFileName              = "elasticsearch.yml"
+	ConfigFileMountPath         = "/usr/share/elasticsearch/config"
+	TempConfigFileMountPath     = "/elasticsearch/temp-config"
+	DatabaseConfigMapSuffix     = "config"
+	SecurityConfigFileMountPath = "/usr/share/elasticsearch/plugins/opendistro_security/securityconfig"
+	InternalUserFileName        = "internal_users.yml"
 )
 
 var internalUserConfigFile = `
----
-# This is the internal user database
-# The hash value is a bcrypt hash and can be generated with plugin/tools/hash.sh
-
-_meta:
-  type: "internalusers"
-  config_version: 2
-
-# Define your internal users here
-
 admin:
   hash: "%s"
-  reserved: true
-  backend_roles:
-  - "admin"
-  description: "Admin user"
 
 kibanaserver:
   hash: "%s"
-  reserved: true
-  description: "Kibanaserver user"
-
-## Demo users
 
 kibanaro:
   hash: "%s"
-  reserved: false
-  backend_roles:
-  - "kibanauser"
-  - "readall"
-  attributes:
-    attribute1: "value1"
-    attribute2: "value2"
-    attribute3: "value3"
-  description: "Demo kibanaro user"
 
 logstash:
   hash: "%s"
-  reserved: false
-  backend_roles:
-  - "logstash"
-  description: "Demo logstash user"
 
 readall:
   hash: "%s"
-  reserved: false
-  backend_roles:
-  - "readall"
-  description: "Demo readall user"
 
 snapshotrestore:
   hash: "%s"
-  reserved: false
-  backend_roles:
-  - "snapshotrestore"
-  description: "Demo snapshotrestore user"`
+`
 
 var xpack_config = `
 xpack.security.enabled: true
