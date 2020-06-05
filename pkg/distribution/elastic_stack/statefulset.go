@@ -460,69 +460,8 @@ func (es *Elasticsearch) upsertConfigMergerInitContainer(initCon []corev1.Contai
 		Name:            ConfigMergerInitContainerName,
 		Image:           es.esVersion.Spec.InitContainer.YQImage,
 		ImagePullPolicy: corev1.PullIfNotPresent,
-		Command:         []string{"sh"},
 		Env:             envList,
-		Args: []string{
-			"-c",
-			`set -x
-echo "changing ownership of data folder: /usr/share/elasticsearch/data"
-chown -R 1000:1000 /usr/share/elasticsearch/data
-
-TEMP_CONFIG_FILE=/elasticsearch/temp-config/elasticsearch.yml
-CUSTOM_CONFIG_DIR="/elasticsearch/custom-config"
-CONFIG_FILE=/usr/share/elasticsearch/config/elasticsearch.yml
-
-if [ -f $TEMP_CONFIG_FILE ]; then
-  cp $TEMP_CONFIG_FILE $CONFIG_FILE
-else
-  touch $CONFIG_FILE
-fi
-
-# yq changes the file permissions after merging custom configuration.
-# we need to restore the original permissions after merging done.
-ORIGINAL_PERMISSION=$(stat -c '%a' $CONFIG_FILE)
-
-# if common-config file exist then apply it
-if [ -f $CUSTOM_CONFIG_DIR/common-config.yml ]; then
-  yq merge -i --overwrite $CONFIG_FILE $CUSTOM_CONFIG_DIR/common-config.yml
-elif [ -f $CUSTOM_CONFIG_DIR/common-config.yaml ]; then
-  yq merge -i --overwrite $CONFIG_FILE $CUSTOM_CONFIG_DIR/common-config.yaml
-fi
-
-# if it is data node and data-config file exist then apply it
-if [[ "$NODE_DATA" == true ]]; then
-  if [ -f $CUSTOM_CONFIG_DIR/data-config.yml ]; then
-    yq merge -i --overwrite $CONFIG_FILE $CUSTOM_CONFIG_DIR/data-config.yml
-  elif [ -f $CUSTOM_CONFIG_DIR/data-config.yaml ]; then
-    yq merge -i --overwrite $CONFIG_FILE $CUSTOM_CONFIG_DIR/data-config.yaml
-  fi
-fi
-
-# if it is client node and client-config file exist then apply it
-if [[ "$NODE_INGEST" == true ]]; then
-  if [ -f $CUSTOM_CONFIG_DIR/client-config.yml ]; then
-    yq merge -i --overwrite $CONFIG_FILE $CUSTOM_CONFIG_DIR/client-config.yml
-  elif [ -f $CUSTOM_CONFIG_DIR/client-config.yaml ]; then
-    yq merge -i --overwrite $CONFIG_FILE $CUSTOM_CONFIG_DIR/client-config.yaml
-  fi
-fi
-
-# if it is master node and mater-config file exist then apply it
-if [[ "$NODE_MASTER" == true ]]; then
-  if [ -f $CUSTOM_CONFIG_DIR/master-config.yml ]; then
-    yq merge -i --overwrite $CONFIG_FILE $CUSTOM_CONFIG_DIR/master-config.yml
-  elif [ -f $CUSTOM_CONFIG_DIR/master-config.yaml ]; then
-    yq merge -i --overwrite $CONFIG_FILE $CUSTOM_CONFIG_DIR/master-config.yaml
-  fi
-fi
-
-# restore original permission of elasticsearh.yml file
-if [[ "$ORIGINAL_PERMISSION" != "" ]]; then
-  chmod $ORIGINAL_PERMISSION $CONFIG_FILE
-fi
-`,
-		},
-		VolumeMounts: volumeMounts,
+		VolumeMounts:    volumeMounts,
 	}
 
 	return append(initCon, configMerger)
