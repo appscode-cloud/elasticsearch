@@ -77,7 +77,7 @@ func (es *Elasticsearch) createCertSecret() (*corev1.SecretVolumeSource, error) 
 	if err != nil {
 		return nil, err
 	}
-	err = certlib.CreateNodeCertificate(certPath, es.elasticsearch, caKey, caCert, pass)
+	err = certlib.CreateNodeCertificateJKS(certPath, es.elasticsearch, caKey, caCert, pass)
 	if err != nil {
 		return nil, err
 	}
@@ -96,7 +96,7 @@ func (es *Elasticsearch) createCertSecret() (*corev1.SecretVolumeSource, error) 
 		certlib.NodeKeyStore: node,
 	}
 
-	if err := certlib.CreateClientCertificate(certPath, es.elasticsearch, caKey, caCert, pass); err != nil {
+	if err := certlib.CreateClientCertificateJKS(certPath, es.elasticsearch, caKey, caCert, pass); err != nil {
 		return nil, err
 	}
 

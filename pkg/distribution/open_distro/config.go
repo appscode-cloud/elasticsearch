@@ -58,20 +58,37 @@ snapshotrestore:
   hash: "%s"
 `
 
-var xpack_config = `
-xpack.security.enabled: true
+var opendistro_security_enabled = `######## Start OpenDistro for Elasticsearch Security Configuration ########
+opendistro_security.ssl.transport.pemcert_filepath: certs/node.pem
+opendistro_security.ssl.transport.pemkey_filepath: certs/node-key.pem
+opendistro_security.ssl.transport.pemtrustedcas_filepath: certs/root-ca.pem
+opendistro_security.ssl.transport.enforce_hostname_verification: false
 
-xpack.security.transport.ssl.enabled: true
-xpack.security.transport.ssl.verification_mode: certificate
-xpack.security.transport.ssl.keystore.path: /usr/share/elasticsearch/config/certs/node.jks
-xpack.security.transport.ssl.keystore.password: ${KEY_PASS}
-xpack.security.transport.ssl.truststore.path: /usr/share/elasticsearch/config/certs/root.jks
-xpack.security.transport.ssl.truststore.password: ${KEY_PASS}
+opendistro_security.ssl.http.enabled: true
+opendistro_security.ssl.http.pemcert_filepath: certs/node.pem
+opendistro_security.ssl.http.pemkey_filepath: certs/node-key.pem
+opendistro_security.ssl.http.pemtrustedcas_filepath: certs/root-ca.pem
+opendistro_security.allow_default_init_securityindex: true
+opendistro_security.authcz.admin_dn:
+	- %s
+opendistro_security.nodes_dn:
+	- %s
 
-xpack.security.http.ssl.keystore.path: /usr/share/elasticsearch/config/certs/client.jks
-xpack.security.http.ssl.keystore.password: ${KEY_PASS}
-xpack.security.http.ssl.truststore.path: /usr/share/elasticsearch/config/certs/root.jks
-xpack.security.http.ssl.truststore.password: ${KEY_PASS}
+opendistro_security.audit.type: internal_elasticsearch
+opendistro_security.enable_snapshot_restore_privilege: true
+opendistro_security.check_snapshot_restore_write_privileges: true
+opendistro_security.restapi.roles_enabled: ["all_access", "security_rest_api_access"]
+cluster.routing.allocation.disk.threshold_enabled: false
+node.max_local_storage_nodes: 3
+######## End OpenDistro for Elasticsearch Security Configuration ########
+`
+
+var opendistro_security_disabled = `######## Start OpenDistro for Elasticsearch Security Configuration ########
+opendistro_security.disabled: true
+
+cluster.routing.allocation.disk.threshold_enabled: false
+node.max_local_storage_nodes: 3
+######## End OpenDistro for Elasticsearch Security Configuration ########
 `
 
 func (es *Elasticsearch) EnsureDefaultConfig() error {

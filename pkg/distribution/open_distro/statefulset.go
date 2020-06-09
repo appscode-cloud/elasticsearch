@@ -679,28 +679,6 @@ func (es *Elasticsearch) upsertContainerEnv(envList []corev1.EnvVar) []corev1.En
 			Name:  "network.host",
 			Value: "0.0.0.0",
 		},
-		{
-			Name: "ELASTIC_USER",
-			ValueFrom: &corev1.EnvVarSource{
-				SecretKeyRef: &corev1.SecretKeySelector{
-					LocalObjectReference: corev1.LocalObjectReference{
-						Name: es.elasticsearch.Spec.DatabaseSecret.SecretName,
-					},
-					Key: KeyAdminUserName,
-				},
-			},
-		},
-		{
-			Name: "ELASTIC_PASSWORD",
-			ValueFrom: &corev1.EnvVarSource{
-				SecretKeyRef: &corev1.SecretKeySelector{
-					LocalObjectReference: corev1.LocalObjectReference{
-						Name: es.elasticsearch.Spec.DatabaseSecret.SecretName,
-					},
-					Key: KeyAdminPassword,
-				},
-			},
-		},
 	}...)
 
 	if strings.HasPrefix(es.esVersion.Spec.Version, "1.") {

@@ -39,10 +39,11 @@ import (
 )
 
 const (
-	CertsDir = "/tmp/certs/certs"
+	duration365d = time.Hour * 24 * 365
+	CertsDir     = "/tmp/certs/certs"
 
 	RootKey      = "root-key.pem"
-	RootCert     = "root.pem"
+	RootCert     = "root-ca.pem"
 	RootKeyStore = "root.jks"
 	RootAlias    = "root-ca"
 
@@ -51,6 +52,9 @@ const (
 	NodePKCS12   = "node.pkcs12"
 	NodeKeyStore = "node.jks"
 	NodeAlias    = "elasticsearch-node"
+
+	AdminKey  = "admin-key.pem"
+	AdminCert = "admin.pem"
 
 	sgAdminKey      = "sgadmin-key.pem"
 	sgAdminCert     = "sgadmin.pem"
@@ -100,7 +104,7 @@ func CreateCaCertificate(certPath string) (*rsa.PrivateKey, *x509.Certificate, s
 	return caKey, caCert, pass, nil
 }
 
-func CreateNodeCertificate(certPath string, elasticsearch *api.Elasticsearch, caKey *rsa.PrivateKey, caCert *x509.Certificate, pass string) error {
+func CreateNodeCertificateJKS(certPath string, elasticsearch *api.Elasticsearch, caKey *rsa.PrivateKey, caCert *x509.Certificate, pass string) error {
 	cfg := cert.Config{
 		CommonName:   elasticsearch.OffshootName(),
 		Organization: []string{"Elasticsearch Operator"},
@@ -150,7 +154,39 @@ func CreateNodeCertificate(certPath string, elasticsearch *api.Elasticsearch, ca
 	return nil
 }
 
-func CreateAdminCertificate(certPath string, caKey *rsa.PrivateKey, caCert *x509.Certificate, pass string) error {
+func CreateNodeCertificatePEM(certPath string, elasticsearch *api.Elasticsearch, caKey *rsa.PrivateKey, caCert *x509.Certificate) error {
+	cfg := cert.Config{
+		CommonName:   elasticsearch.OffshootName(),
+		Organization: []string{"Elasticsearch Operator"},
+		Usages: []x509.ExtKeyUsage{
+			x509.ExtKeyUsageServerAuth,
+			x509.ExtKeyUsageClientAuth,
+		},
+	}
+
+	nodePrivateKey, err := cert.NewPrivateKey()
+	if err != nil {
+		return errors.New("failed to generate key for node certificate")
+	}
+	nodeCertificate, err := NewSignedCert(cfg, nodePrivateKey, caCert, caKey)
+	if err != nil {
+		return errors.New("failed to sign node certificate")
+	}
+
+	nodeKeyByte := cert.EncodePrivateKeyPEM(nodePrivateKey)
+	if !ioutil.WriteString(filepath.Join(certPath, NodeKey), string(nodeKeyByte)) {
+		return errors.New("failed to write key for node certificate")
+	}
+
+	nodeCertByte := cert.EncodeCertPEM(nodeCertificate)
+	if !ioutil.WriteString(filepath.Join(certPath, NodeCert), string(nodeCertByte)) {
+		return errors.New("failed to write node certificate")
+	}
+
+	return nil
+}
+
+func CreateSGAdminCertificateJKS(certPath string, caKey *rsa.PrivateKey, caCert *x509.Certificate, pass string) error {
 	cfg := cert.Config{
 		CommonName:   "sgadmin",
 		Organization: []string{"Elasticsearch Operator"},
@@ -205,7 +241,46 @@ func CreateAdminCertificate(certPath string, caKey *rsa.PrivateKey, caCert *x509
 	return nil
 }
 
-func CreateClientCertificate(certPath string, elasticsearch *api.Elasticsearch, caKey *rsa.PrivateKey, caCert *x509.Certificate, pass string) error {
+func CreateAdminCertificatePEM(certPath string, elasticsearch *api.Elasticsearch, caKey *rsa.PrivateKey, caCert *x509.Certificate) error {
+	cfg := cert.Config{
+		CommonName:   elasticsearch.OffshootName() + "-admin",
+		Organization: []string{"Elasticsearch Operator"},
+		AltNames: cert.AltNames{
+			DNSNames: []string{
+				"localhost",
+				fmt.Sprintf("%v.%v.svc", elasticsearch.OffshootName(), elasticsearch.Namespace),
+			},
+		},
+		Usages: []x509.ExtKeyUsage{
+			x509.ExtKeyUsageServerAuth,
+			x509.ExtKeyUsageClientAuth,
+		},
+	}
+
+	clientPrivateKey, err := cert.NewPrivateKey()
+	if err != nil {
+		return errors.New("failed to generate key for admin certificate")
+	}
+
+	clientCertificate, err := cert.NewSignedCert(cfg, clientPrivateKey, caCert, caKey)
+	if err != nil {
+		return errors.New("failed to sign admin certificate")
+	}
+
+	adminKeyByte := cert.EncodePrivateKeyPEM(clientPrivateKey)
+	if !ioutil.WriteString(filepath.Join(certPath, AdminKey), string(adminKeyByte)) {
+		return errors.New("failed to write key for admin certificate")
+	}
+
+	adminCertByte := cert.EncodeCertPEM(clientCertificate)
+	if !ioutil.WriteString(filepath.Join(certPath, AdminCert), string(adminCertByte)) {
+		return errors.New("failed to write admin certificate")
+	}
+
+	return nil
+}
+
+func CreateClientCertificateJKS(certPath string, elasticsearch *api.Elasticsearch, caKey *rsa.PrivateKey, caCert *x509.Certificate, pass string) error {
 	cfg := cert.Config{
 		CommonName:   elasticsearch.OffshootName(),
 		Organization: []string{"Elasticsearch Operator"},
@@ -262,10 +337,6 @@ func CreateClientCertificate(certPath string, elasticsearch *api.Elasticsearch, 
 
 	return nil
 }
-
-const (
-	duration365d = time.Hour * 24 * 365
-)
 
 // NewSignedCert creates a signed certificate using the given CA certificate and key
 func NewSignedCert(cfg cert.Config, key *rsa.PrivateKey, caCert *x509.Certificate, caKey *rsa.PrivateKey) (*x509.Certificate, error) {

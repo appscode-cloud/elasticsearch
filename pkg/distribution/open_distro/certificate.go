@@ -27,7 +27,6 @@ import (
 	certlib "kubedb.dev/elasticsearch/pkg/lib/cert"
 
 	"github.com/appscode/go/crypto/rand"
-	"gomodules.xyz/cert"
 	corev1 "k8s.io/api/core/v1"
 	kerr "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -73,40 +72,46 @@ func (es *Elasticsearch) createCertSecret() (*corev1.SecretVolumeSource, error) 
 		return nil, err
 	}
 
-	caKey, caCert, pass, err := certlib.CreateCaCertificate(certPath)
+	caKey, caCert, _, err := certlib.CreateCaCertificate(certPath)
 	if err != nil {
 		return nil, err
 	}
-	err = certlib.CreateNodeCertificate(certPath, es.elasticsearch, caKey, caCert, pass)
+	rootCa, err := ioutil.ReadFile(filepath.Join(certPath, certlib.RootCert))
 	if err != nil {
 		return nil, err
 	}
-
-	root, err := ioutil.ReadFile(filepath.Join(certPath, certlib.RootKeyStore))
-	if err != nil {
-		return nil, err
-	}
-	node, err := ioutil.ReadFile(filepath.Join(certPath, certlib.NodeKeyStore))
-	if err != nil {
-		return nil, err
-	}
-
 	data := map[string][]byte{
-		certlib.RootKeyStore: root,
-		certlib.NodeKeyStore: node,
+		certlib.RootCert: rootCa,
 	}
 
-	if err := certlib.CreateClientCertificate(certPath, es.elasticsearch, caKey, caCert, pass); err != nil {
-		return nil, err
-	}
-
-	client, err := ioutil.ReadFile(filepath.Join(certPath, certlib.ClientKeyStore))
+	err = certlib.CreateNodeCertificatePEM(certPath, es.elasticsearch, caKey, caCert)
 	if err != nil {
 		return nil, err
 	}
+	nodeCert, err := ioutil.ReadFile(filepath.Join(certPath, certlib.NodeCert))
+	if err != nil {
+		return nil, err
+	}
+	nodeKey, err := ioutil.ReadFile(filepath.Join(certPath, certlib.NodeKey))
+	if err != nil {
+		return nil, err
+	}
+	data[certlib.NodeKey] = nodeKey
+	data[certlib.NodeCert] = nodeCert
 
-	data[certlib.RootCert] = cert.EncodeCertPEM(caCert)
-	data[certlib.ClientKeyStore] = client
+	if err := certlib.CreateAdminCertificatePEM(certPath, es.elasticsearch, caKey, caCert); err != nil {
+		return nil, err
+	}
+	adminCert, err := ioutil.ReadFile(filepath.Join(certPath, certlib.AdminCert))
+	if err != nil {
+		return nil, err
+	}
+	adminKey, err := ioutil.ReadFile(filepath.Join(certPath, certlib.AdminKey))
+	if err != nil {
+		return nil, err
+	}
+	data[certlib.AdminKey] = adminKey
+	data[certlib.AdminCert] = adminCert
 
 	name := fmt.Sprintf("%v-cert", es.elasticsearch.OffshootName())
 	secret := &corev1.Secret{
@@ -116,9 +121,6 @@ func (es *Elasticsearch) createCertSecret() (*corev1.SecretVolumeSource, error) 
 		},
 		Type: corev1.SecretTypeOpaque,
 		Data: data,
-		StringData: map[string]string{
-			"key_pass": pass,
-		},
 	}
 	if _, err := es.kClient.CoreV1().Secrets(es.elasticsearch.Namespace).Create(context.TODO(), secret, metav1.CreateOptions{}); err != nil {
 		return nil, err
