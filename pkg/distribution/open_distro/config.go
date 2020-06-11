@@ -20,6 +20,7 @@ import (
 	"fmt"
 
 	api "kubedb.dev/apimachinery/apis/kubedb/v1alpha1"
+	certlib "kubedb.dev/elasticsearch/pkg/lib/cert"
 
 	"github.com/pkg/errors"
 	"golang.org/x/crypto/bcrypt"
@@ -37,6 +38,16 @@ const (
 	SecurityConfigFileMountPath = "/usr/share/elasticsearch/plugins/opendistro_security/securityconfig"
 	InternalUserFileName        = "internal_users.yml"
 )
+
+var adminDNTemplate = `
+opendistro_security.authcz.admin_dn:
+- "%s"
+`
+
+var nodesDNTemplate = `
+opendistro_security.nodes_dn:
+- "%s"
+`
 
 var internalUserConfigFile = `
 admin:
@@ -69,10 +80,12 @@ opendistro_security.ssl.http.pemcert_filepath: certs/node.pem
 opendistro_security.ssl.http.pemkey_filepath: certs/node-key.pem
 opendistro_security.ssl.http.pemtrustedcas_filepath: certs/root-ca.pem
 opendistro_security.allow_default_init_securityindex: true
-opendistro_security.authcz.admin_dn:
-	- %s
-opendistro_security.nodes_dn:
-	- %s
+
+# opendistro_security.authcz.admin_dn:
+%s
+
+# opendistro_security.nodes_dn:
+%s
 
 opendistro_security.audit.type: internal_elasticsearch
 opendistro_security.enable_snapshot_restore_privilege: true
@@ -111,8 +124,40 @@ func (es *Elasticsearch) EnsureDefaultConfig() error {
 		return errors.Wrap(err, "failed to generate default internal user config")
 	}
 
-	data := map[string][]byte{
-		InternalUserFileName: []byte(inUserConfig),
+	data := make(map[string][]byte)
+
+	if !es.elasticsearch.Spec.DisableSecurity {
+		if es.elasticsearch.Spec.CertificateSecret == nil {
+			return errors.New("certificateSecret is empty")
+		}
+		certSecret, err := es.kClient.CoreV1().Secrets(es.elasticsearch.Namespace).Get(context.TODO(), es.elasticsearch.Spec.CertificateSecret.SecretName, metav1.GetOptions{})
+		if err != nil {
+			return errors.Wrap(err, fmt.Sprintf("failed to get certificateSecret:%s/%s", es.elasticsearch.Namespace, es.elasticsearch.Spec.CertificateSecret.SecretName))
+		}
+
+		// TODO: handle case for different node certs for different nodes
+		nodesDN := ""
+		if value, ok := certSecret.Data[certlib.NodeCert]; ok {
+			subj, err := certlib.ExtractSubjectFromCertificate(value)
+			if err != nil {
+				return err
+			}
+			nodesDN = fmt.Sprintf(nodesDNTemplate, subj.String())
+		}
+
+		adminDN := ""
+		if value, ok := certSecret.Data[certlib.AdminCert]; ok {
+			subj, err := certlib.ExtractSubjectFromCertificate(value)
+			if err != nil {
+				return err
+			}
+			adminDN = fmt.Sprintf(adminDNTemplate, subj.String())
+		}
+
+		data[ConfigFileName] = []byte(fmt.Sprintf(opendistro_security_enabled, adminDN, nodesDN))
+		data[InternalUserFileName] = []byte(inUserConfig)
+	} else {
+		data[ConfigFileName] = []byte(opendistro_security_disabled)
 	}
 	_, _, err = core_util.CreateOrPatchSecret(context.TODO(), es.kClient, secretMeta, func(in *corev1.Secret) *corev1.Secret {
 		in.Labels = core_util.UpsertMap(in.Labels, es.elasticsearch.OffshootLabels())

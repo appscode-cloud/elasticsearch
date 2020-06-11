@@ -21,6 +21,7 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/asn1"
+	"encoding/pem"
 	"fmt"
 	"math"
 	"math/big"
@@ -173,7 +174,10 @@ func CreateNodeCertificatePEM(certPath string, elasticsearch *api.Elasticsearch,
 		return errors.New("failed to sign node certificate")
 	}
 
-	nodeKeyByte := cert.EncodePrivateKeyPEM(nodePrivateKey)
+	nodeKeyByte, err := cert.EncodePKCS8PrivateKeyPEM(nodePrivateKey)
+	if err != nil {
+		return errors.Wrap(err, "failed to encode node private key")
+	}
 	if !ioutil.WriteString(filepath.Join(certPath, NodeKey), string(nodeKeyByte)) {
 		return errors.New("failed to write key for node certificate")
 	}
@@ -267,7 +271,10 @@ func CreateAdminCertificatePEM(certPath string, elasticsearch *api.Elasticsearch
 		return errors.New("failed to sign admin certificate")
 	}
 
-	adminKeyByte := cert.EncodePrivateKeyPEM(clientPrivateKey)
+	adminKeyByte, err := cert.EncodePKCS8PrivateKeyPEM(clientPrivateKey)
+	if err != nil {
+		return errors.Wrap(err, "failed to encode admin private key")
+	}
 	if !ioutil.WriteString(filepath.Join(certPath, AdminKey), string(adminKeyByte)) {
 		return errors.New("failed to write key for admin certificate")
 	}
@@ -410,4 +417,16 @@ func marshalSANs(dnsNames, emailAddresses []string, ipAddresses []net.IP) (derBy
 	// ref: https://stackoverflow.com/a/47917273/244009
 	rawValues = append(rawValues, asn1.RawValue{FullBytes: []byte{0x88, 0x05, 0x2A, 0x03, 0x04, 0x05, 0x05}})
 	return asn1.Marshal(rawValues)
+}
+
+func ExtractSubjectFromCertificate(crt []byte) (*pkix.Name, error) {
+	block, _ := pem.Decode(crt)
+	if block == nil || block.Type != cert.CertificateBlockType {
+		return nil, errors.New("failed to decode PEM file")
+	}
+	c, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to parse the certificate")
+	}
+	return &c.Subject, nil
 }

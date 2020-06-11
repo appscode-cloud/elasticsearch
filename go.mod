@@ -15,7 +15,7 @@ require (
 	github.com/spf13/cobra v0.0.5
 	github.com/spf13/pflag v1.0.5
 	golang.org/x/crypto v0.0.0-20200220183623-bac4c82f6975
-	gomodules.xyz/cert v1.0.3
+	gomodules.xyz/cert v1.0.4-0.20200611102726-a099cd584063
 	gomodules.xyz/envsubst v0.1.0
 	gopkg.in/olivere/elastic.v5 v5.0.85
 	gopkg.in/olivere/elastic.v6 v6.2.31

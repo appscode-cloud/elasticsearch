@@ -450,7 +450,7 @@ golang.org/x/tools/go/internal/gcimporter
 # golang.org/x/xerrors v0.0.0-20191204190536-9bdfabe68543
 golang.org/x/xerrors
 golang.org/x/xerrors/internal
-# gomodules.xyz/cert v1.0.3
+# gomodules.xyz/cert v1.0.4-0.20200611102726-a099cd584063
 ## explicit
 gomodules.xyz/cert
 # gomodules.xyz/envsubst v0.1.0

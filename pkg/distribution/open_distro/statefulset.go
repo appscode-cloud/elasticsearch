@@ -207,6 +207,14 @@ func (es *Elasticsearch) getVolumes2(esNode *api.ElasticsearchNode) ([]corev1.Vo
 	var volumes []corev1.Volume
 	var pvc *corev1.PersistentVolumeClaim
 
+	// Upsert Volume for config directory
+	volumes = core_util.UpsertVolume(volumes, corev1.Volume{
+		Name: "esconfig",
+		VolumeSource: corev1.VolumeSource{
+			EmptyDir: &corev1.EmptyDirVolumeSource{},
+		},
+	})
+
 	// Default configuration files, will be stored in a temporary directory.
 	// i.e. "/elasticsearch/temp-config"
 	secretName := fmt.Sprintf("%v-%v", es.elasticsearch.OffshootName(), DatabaseConfigMapSuffix)
@@ -223,18 +231,13 @@ func (es *Elasticsearch) getVolumes2(esNode *api.ElasticsearchNode) ([]corev1.Vo
 	// with user provided security-config files(if any) from "config-merger" init container
 	// and later those files will be mounted on this shared volume so that elaticsearch container
 	// can use them.
-	volumes = core_util.UpsertVolume(volumes, corev1.Volume{
-		Name: "security-config",
-		VolumeSource: corev1.VolumeSource{
-			EmptyDir: &corev1.EmptyDirVolumeSource{},
-		},
-	})
-
-	// Upsert Volume for the default configuration provided for x-pack.
-	// This configuration will also be copied as default elasticsearch configuration (i.e. elasticsearch.yaml)
-	// from config-merger initContainer.
 	if !es.elasticsearch.Spec.DisableSecurity {
-
+		volumes = core_util.UpsertVolume(volumes, corev1.Volume{
+			Name: "security-config",
+			VolumeSource: corev1.VolumeSource{
+				EmptyDir: &corev1.EmptyDirVolumeSource{},
+			},
+		})
 	}
 
 	// Upsert Volume for user provided custom configuration.
@@ -285,9 +288,41 @@ func (es *Elasticsearch) getVolumes2(esNode *api.ElasticsearchNode) ([]corev1.Vo
 	}
 
 	// Upsert Volume for certificates
-
+	if es.elasticsearch.Spec.CertificateSecret == nil && !es.elasticsearch.Spec.DisableSecurity {
+		return nil, nil, errors.New("Certificate secret is missing")
+	}
 	if !es.elasticsearch.Spec.DisableSecurity {
-
+		volumes = core_util.UpsertVolume(volumes, corev1.Volume{
+			Name: "certs",
+			VolumeSource: corev1.VolumeSource{
+				Secret: &corev1.SecretVolumeSource{
+					SecretName:  es.elasticsearch.Spec.CertificateSecret.SecretName,
+					DefaultMode: types.Int32P(384),
+					Items: []corev1.KeyToPath{
+						{
+							Key:  certlib.RootCert,
+							Path: certlib.RootCert,
+						},
+						{
+							Key:  certlib.NodeCert,
+							Path: certlib.NodeCert,
+						},
+						{
+							Key:  certlib.NodeKey,
+							Path: certlib.NodeKey,
+						},
+						{
+							Key:  certlib.AdminCert,
+							Path: certlib.AdminCert,
+						},
+						{
+							Key:  certlib.AdminKey,
+							Path: certlib.AdminKey,
+						},
+					},
+				},
+			},
+		})
 	}
 
 	// Upsert Volume for monitoring sidecar
@@ -462,17 +497,32 @@ func (es *Elasticsearch) getContainers2(esNode *api.ElasticsearchNode, envList [
 
 	// Add volumeMounts for elasticsearch container
 	// 		- data directory
-	//		- configuration
-	// 		- temp directory
 	volumeMount := []corev1.VolumeMount{
 		{
 			Name:      "data",
 			MountPath: DataDir,
 		},
 		{
-			Name:      "security-config",
-			MountPath: SecurityConfigFileMountPath,
+			Name:      "esconfig",
+			MountPath: filepath.Join(ConfigFileMountPath, ConfigFileName),
+			SubPath:   ConfigFileName,
 		},
+	}
+
+	// Add volumeMounts for elasticsearch container
+	// 		- security config directory
+	//		- certificates directory
+	if !es.elasticsearch.Spec.DisableSecurity {
+		volumeMount = core_util.UpsertVolumeMount(volumeMount, []corev1.VolumeMount{
+			{
+				Name:      "security-config",
+				MountPath: SecurityConfigFileMountPath,
+			},
+			{
+				Name:      "certs",
+				MountPath: filepath.Join(ConfigFileMountPath, "certs"),
+			},
+		}...)
 	}
 
 	containers := []corev1.Container{
@@ -612,13 +662,20 @@ func (es *Elasticsearch) upsertConfigMergerInitContainer(initCon []corev1.Contai
 			MountPath: TempConfigFileMountPath,
 		},
 		{
-			Name:      "security-config",
-			MountPath: SecurityConfigFileMountPath,
-		},
-		{
 			Name:      "data",
 			MountPath: DataDir,
 		},
+		{
+			Name:      "esconfig",
+			MountPath: ConfigFileMountPath,
+		},
+	}
+
+	if !es.elasticsearch.Spec.DisableSecurity {
+		volumeMounts = core_util.UpsertVolumeMount(volumeMounts, corev1.VolumeMount{
+			Name:      "security-config",
+			MountPath: SecurityConfigFileMountPath,
+		})
 	}
 
 	// mount path for custom configuration
