@@ -25,6 +25,7 @@ import (
 	api "kubedb.dev/apimachinery/apis/kubedb/v1alpha1"
 	"kubedb.dev/apimachinery/client/clientset/versioned/typed/kubedb/v1alpha1/util"
 	certlib "kubedb.dev/elasticsearch/pkg/lib/cert"
+	"kubedb.dev/elasticsearch/pkg/lib/cert/pkcs12"
 
 	"github.com/appscode/go/crypto/rand"
 	"gomodules.xyz/cert"
@@ -73,11 +74,11 @@ func (es *Elasticsearch) createCertSecret() (*corev1.SecretVolumeSource, error) 
 		return nil, err
 	}
 
-	caKey, caCert, pass, err := certlib.CreateCaCertificate(certPath)
+	caKey, caCert, pass, err := pkcs12.CreateCaCertificateJKS(certPath)
 	if err != nil {
 		return nil, err
 	}
-	err = certlib.CreateNodeCertificateJKS(certPath, es.elasticsearch, caKey, caCert, pass)
+	err = pkcs12.CreateNodeCertificateJKS(certPath, es.elasticsearch, caKey, caCert, pass)
 	if err != nil {
 		return nil, err
 	}
@@ -96,7 +97,7 @@ func (es *Elasticsearch) createCertSecret() (*corev1.SecretVolumeSource, error) 
 		certlib.NodeKeyStore: node,
 	}
 
-	if err := certlib.CreateClientCertificateJKS(certPath, es.elasticsearch, caKey, caCert, pass); err != nil {
+	if err := pkcs12.CreateClientCertificateJKS(certPath, es.elasticsearch, caKey, caCert, pass); err != nil {
 		return nil, err
 	}
 

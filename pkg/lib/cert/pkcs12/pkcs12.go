@@ -13,7 +13,7 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 */
-package controller
+package pkcs12
 
 import (
 	cryptorand "crypto/rand"
@@ -30,6 +30,7 @@ import (
 	"time"
 
 	api "kubedb.dev/apimachinery/apis/kubedb/v1alpha1"
+	certlib "kubedb.dev/elasticsearch/pkg/lib/cert"
 	"kubedb.dev/elasticsearch/pkg/lib/keytool"
 
 	"github.com/appscode/go/crypto/rand"
@@ -38,34 +39,7 @@ import (
 	"gomodules.xyz/cert"
 )
 
-const (
-	certsDir = "/tmp/certs/certs"
-
-	rootKey      = "root-key.pem"
-	rootCert     = "root.pem"
-	rootKeyStore = "root.jks"
-	rootAlias    = "root-ca"
-
-	nodeKey      = "node-key.pem"
-	nodeCert     = "node.pem"
-	nodePKCS12   = "node.pkcs12"
-	nodeKeyStore = "node.jks"
-	nodeAlias    = "elasticsearch-node"
-
-	sgAdminKey      = "sgadmin-key.pem"
-	sgAdminCert     = "sgadmin.pem"
-	sgAdminPKCS12   = "sgadmin.pkcs12"
-	sgAdminKeyStore = "sgadmin.jks"
-	sgAdminAlias    = "elasticsearch-sgadmin"
-
-	clientKey      = "client-key.pem"
-	clientCert     = "client.pem"
-	clientPKCS12   = "client.pkcs12"
-	clientKeyStore = "client.jks"
-	clientAlias    = "elasticsearch-client"
-)
-
-func createCaCertificate(certPath string) (*rsa.PrivateKey, *x509.Certificate, string, error) {
+func CreateCaCertificateJKS(certPath string) (*rsa.PrivateKey, *x509.Certificate, string, error) {
 	cfg := cert.Config{
 		CommonName:   "KubeDB Com. Root CA",
 		Organization: []string{"Elasticsearch Operator"},
@@ -82,25 +56,26 @@ func createCaCertificate(certPath string) (*rsa.PrivateKey, *x509.Certificate, s
 	}
 
 	nodeKeyByte := cert.EncodePrivateKeyPEM(caKey)
-	if !ioutil.WriteString(filepath.Join(certPath, rootKey), string(nodeKeyByte)) {
+	if !ioutil.WriteString(filepath.Join(certPath, certlib.RootKey), string(nodeKeyByte)) {
 		return nil, nil, "", errors.New("failed to write key for CA certificate")
 	}
+
 	caCertByte := cert.EncodeCertPEM(caCert)
-	if !ioutil.WriteString(filepath.Join(certPath, rootCert), string(caCertByte)) {
+	if !ioutil.WriteString(filepath.Join(certPath, certlib.RootCert), string(caCertByte)) {
 		return nil, nil, "", errors.New("failed to write CA certificate")
 	}
 
 	pass := rand.Characters(6)
 
-	err = keytool.PEMToJKS(filepath.Join(certPath, rootCert), filepath.Join(certPath, rootKeyStore), pass, rootAlias)
+	err = keytool.PEMToJKS(filepath.Join(certPath, certlib.RootCert), filepath.Join(certPath, certlib.RootKeyStore), pass, certlib.RootAlias)
 	if err != nil {
-		return nil, nil, "", fmt.Errorf("failed to convert %s to %s. Reason: %v", rootCert, rootKeyStore, errors.Cause(err))
+		return nil, nil, "", fmt.Errorf("failed to convert %s to %s. Reason: %v", certlib.RootCert, certlib.RootKeyStore, errors.Cause(err))
 	}
 
 	return caKey, caCert, pass, nil
 }
 
-func createNodeCertificate(certPath string, elasticsearch *api.Elasticsearch, caKey *rsa.PrivateKey, caCert *x509.Certificate, pass string) error {
+func CreateNodeCertificateJKS(certPath string, elasticsearch *api.Elasticsearch, caKey *rsa.PrivateKey, caCert *x509.Certificate, pass string) error {
 	cfg := cert.Config{
 		CommonName:   elasticsearch.OffshootName(),
 		Organization: []string{"Elasticsearch Operator"},
@@ -114,17 +89,19 @@ func createNodeCertificate(certPath string, elasticsearch *api.Elasticsearch, ca
 	if err != nil {
 		return errors.New("failed to generate key for node certificate")
 	}
+
 	nodeCertificate, err := NewSignedCert(cfg, nodePrivateKey, caCert, caKey)
 	if err != nil {
 		return errors.New("failed to sign node certificate")
 	}
 
 	nodeKeyByte := cert.EncodePrivateKeyPEM(nodePrivateKey)
-	if !ioutil.WriteString(filepath.Join(certPath, nodeKey), string(nodeKeyByte)) {
+	if !ioutil.WriteString(filepath.Join(certPath, certlib.NodeKey), string(nodeKeyByte)) {
 		return errors.New("failed to write key for node certificate")
 	}
+
 	nodeCertByte := cert.EncodeCertPEM(nodeCertificate)
-	if !ioutil.WriteString(filepath.Join(certPath, nodeCert), string(nodeCertByte)) {
+	if !ioutil.WriteString(filepath.Join(certPath, certlib.NodeCert), string(nodeCertByte)) {
 		return errors.New("failed to write node certificate")
 	}
 
@@ -132,25 +109,25 @@ func createNodeCertificate(certPath string, elasticsearch *api.Elasticsearch, ca
 		"openssl",
 		"pkcs12",
 		"-export",
-		"-certfile", filepath.Join(certPath, rootCert),
-		"-inkey", filepath.Join(certPath, nodeKey),
-		"-in", filepath.Join(certPath, nodeCert),
+		"-certfile", filepath.Join(certPath, certlib.RootCert),
+		"-inkey", filepath.Join(certPath, certlib.NodeKey),
+		"-in", filepath.Join(certPath, certlib.NodeCert),
 		"-password", fmt.Sprintf("pass:%s", pass),
-		"-out", filepath.Join(certPath, nodePKCS12),
+		"-out", filepath.Join(certPath, certlib.NodePKCS12),
 	).Output()
 	if err != nil {
-		return errors.New(fmt.Sprintf("failed to generate %s. Reason: %s", nodePKCS12, err.Error()))
+		return errors.New(fmt.Sprintf("failed to generate %s. Reason: %s", certlib.NodePKCS12, err.Error()))
 	}
 
-	err = keytool.PKCS12ToJKS(filepath.Join(certPath, nodePKCS12), filepath.Join(certPath, nodeKeyStore), pass, nodeAlias)
+	err = keytool.PKCS12ToJKS(filepath.Join(certPath, certlib.NodePKCS12), filepath.Join(certPath, certlib.NodeKeyStore), pass, certlib.NodeAlias)
 	if err != nil {
-		return fmt.Errorf("failed to convert %s to %s. Reason: %v", nodePKCS12, nodeKeyStore, errors.Cause(err))
+		return fmt.Errorf("failed to convert %s to %s. Reason: %v", certlib.NodePKCS12, certlib.NodeKeyStore, errors.Cause(err))
 	}
 
 	return nil
 }
 
-func createAdminCertificate(certPath string, caKey *rsa.PrivateKey, caCert *x509.Certificate, pass string) error {
+func CreateSGAdminCertificateJKS(certPath string, caKey *rsa.PrivateKey, caCert *x509.Certificate, pass string) error {
 	cfg := cert.Config{
 		CommonName:   "sgadmin",
 		Organization: []string{"Elasticsearch Operator"},
@@ -167,45 +144,47 @@ func createAdminCertificate(certPath string, caKey *rsa.PrivateKey, caCert *x509
 
 	sgAdminPrivateKey, err := cert.NewPrivateKey()
 	if err != nil {
-		return errors.New("failed to generate key for sgadmin certificate")
+		return errors.New("failed to generate key for sgAdmin certificate")
 	}
+
 	sgAdminCertificate, err := cert.NewSignedCert(cfg, sgAdminPrivateKey, caCert, caKey)
 	if err != nil {
-		return errors.New("failed to sign sgadmin certificate")
+		return errors.New("failed to sign sgAdmin certificate")
 	}
 
 	sgAdminKeyByte := cert.EncodePrivateKeyPEM(sgAdminPrivateKey)
-	if !ioutil.WriteString(filepath.Join(certPath, sgAdminKey), string(sgAdminKeyByte)) {
-		return errors.New("failed to write key for sgadmin certificate")
+	if !ioutil.WriteString(filepath.Join(certPath, certlib.SGAdminKey), string(sgAdminKeyByte)) {
+		return errors.New("failed to write key for sgAdmin certificate")
 	}
+
 	sgAdminCertByte := cert.EncodeCertPEM(sgAdminCertificate)
-	if !ioutil.WriteString(filepath.Join(certPath, sgAdminCert), string(sgAdminCertByte)) {
-		return errors.New("failed to write sgadmin certificate")
+	if !ioutil.WriteString(filepath.Join(certPath, certlib.SGAdminCert), string(sgAdminCertByte)) {
+		return errors.New("failed to write sgAdmin certificate")
 	}
 
 	_, err = exec.Command(
 		"openssl",
 		"pkcs12",
 		"-export",
-		"-certfile", filepath.Join(certPath, rootCert),
-		"-inkey", filepath.Join(certPath, sgAdminKey),
-		"-in", filepath.Join(certPath, sgAdminCert),
+		"-certfile", filepath.Join(certPath, certlib.RootCert),
+		"-inkey", filepath.Join(certPath, certlib.SGAdminKey),
+		"-in", filepath.Join(certPath, certlib.SGAdminCert),
 		"-password", fmt.Sprintf("pass:%s", pass),
-		"-out", filepath.Join(certPath, sgAdminPKCS12),
+		"-out", filepath.Join(certPath, certlib.SGAdminPKCS12),
 	).Output()
 	if err != nil {
-		return errors.New("failed to generate " + sgAdminKeyStore)
+		return errors.New("failed to generate " + certlib.SGAdminKeyStore)
 	}
 
-	err = keytool.PKCS12ToJKS(filepath.Join(certPath, sgAdminPKCS12), filepath.Join(certPath, sgAdminKeyStore), pass, sgAdminAlias)
+	err = keytool.PKCS12ToJKS(filepath.Join(certPath, certlib.SGAdminPKCS12), filepath.Join(certPath, certlib.SGAdminKeyStore), pass, certlib.SGAdminAlias)
 	if err != nil {
-		return fmt.Errorf("failed to convert %s to %s. Reason: %v", sgAdminPKCS12, sgAdminKeyStore, errors.Cause(err))
+		return fmt.Errorf("failed to convert %s to %s. Reason: %v", certlib.SGAdminPKCS12, certlib.SGAdminKeyStore, errors.Cause(err))
 	}
 
 	return nil
 }
 
-func createClientCertificate(certPath string, elasticsearch *api.Elasticsearch, caKey *rsa.PrivateKey, caCert *x509.Certificate, pass string) error {
+func CreateClientCertificateJKS(certPath string, elasticsearch *api.Elasticsearch, caKey *rsa.PrivateKey, caCert *x509.Certificate, pass string) error {
 	cfg := cert.Config{
 		CommonName:   elasticsearch.OffshootName(),
 		Organization: []string{"Elasticsearch Operator"},
@@ -232,12 +211,12 @@ func createClientCertificate(certPath string, elasticsearch *api.Elasticsearch, 
 	}
 
 	clientKeyByte := cert.EncodePrivateKeyPEM(clientPrivateKey)
-	if !ioutil.WriteString(filepath.Join(certPath, clientKey), string(clientKeyByte)) {
+	if !ioutil.WriteString(filepath.Join(certPath, certlib.ClientKey), string(clientKeyByte)) {
 		return errors.New("failed to write key for client certificate")
 	}
 
 	clientCertByte := cert.EncodeCertPEM(clientCertificate)
-	if !ioutil.WriteString(filepath.Join(certPath, clientCert), string(clientCertByte)) {
+	if !ioutil.WriteString(filepath.Join(certPath, certlib.ClientCert), string(clientCertByte)) {
 		return errors.New("failed to write client certificate")
 	}
 
@@ -245,27 +224,23 @@ func createClientCertificate(certPath string, elasticsearch *api.Elasticsearch, 
 		"openssl",
 		"pkcs12",
 		"-export",
-		"-certfile", filepath.Join(certPath, rootCert),
-		"-inkey", filepath.Join(certPath, clientKey),
-		"-in", filepath.Join(certPath, clientCert),
+		"-certfile", filepath.Join(certPath, certlib.RootCert),
+		"-inkey", filepath.Join(certPath, certlib.ClientKey),
+		"-in", filepath.Join(certPath, certlib.ClientCert),
 		"-password", fmt.Sprintf("pass:%s", pass),
-		"-out", filepath.Join(certPath, clientPKCS12),
+		"-out", filepath.Join(certPath, certlib.ClientPKCS12),
 	).Output()
 	if err != nil {
 		return errors.New("failed to generate client.pkcs12")
 	}
 
-	err = keytool.PKCS12ToJKS(filepath.Join(certPath, clientPKCS12), filepath.Join(certPath, clientKeyStore), pass, clientAlias)
+	err = keytool.PKCS12ToJKS(filepath.Join(certPath, certlib.ClientPKCS12), filepath.Join(certPath, certlib.ClientKeyStore), pass, certlib.ClientAlias)
 	if err != nil {
-		return fmt.Errorf("failed to convert %s to %s: Reason: %v", clientPKCS12, clientKeyStore, errors.Cause(err))
+		return fmt.Errorf("failed to convert %s to %s: Reason: %v", certlib.ClientPKCS12, certlib.ClientKeyStore, errors.Cause(err))
 	}
 
 	return nil
 }
-
-const (
-	duration365d = time.Hour * 24 * 365
-)
 
 // NewSignedCert creates a signed certificate using the given CA certificate and key
 func NewSignedCert(cfg cert.Config, key *rsa.PrivateKey, caCert *x509.Certificate, caKey *rsa.PrivateKey) (*x509.Certificate, error) {
@@ -289,7 +264,7 @@ func NewSignedCert(cfg cert.Config, key *rsa.PrivateKey, caCert *x509.Certificat
 		IPAddresses:  cfg.AltNames.IPs,
 		SerialNumber: serial,
 		NotBefore:    caCert.NotBefore,
-		NotAfter:     time.Now().Add(duration365d).UTC(),
+		NotAfter:     time.Now().Add(certlib.Duration365d).UTC(),
 		KeyUsage:     x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
 		ExtKeyUsage:  cfg.Usages,
 		ExtraExtensions: []pkix.Extension{

@@ -319,6 +319,14 @@ func (es *Elasticsearch) getVolumes2(esNode *api.ElasticsearchNode) ([]corev1.Vo
 							Key:  certlib.AdminKey,
 							Path: certlib.AdminKey,
 						},
+						{
+							Key:  certlib.ClientCert,
+							Path: certlib.ClientCert,
+						},
+						{
+							Key:  certlib.ClientKey,
+							Path: certlib.ClientKey,
+						},
 					},
 				},
 			},

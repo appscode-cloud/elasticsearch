@@ -25,6 +25,7 @@ import (
 	api "kubedb.dev/apimachinery/apis/kubedb/v1alpha1"
 	"kubedb.dev/apimachinery/client/clientset/versioned/typed/kubedb/v1alpha1/util"
 	certlib "kubedb.dev/elasticsearch/pkg/lib/cert"
+	"kubedb.dev/elasticsearch/pkg/lib/cert/pkcs8"
 
 	"github.com/appscode/go/crypto/rand"
 	corev1 "k8s.io/api/core/v1"
@@ -72,7 +73,7 @@ func (es *Elasticsearch) createCertSecret() (*corev1.SecretVolumeSource, error) 
 		return nil, err
 	}
 
-	caKey, caCert, _, err := certlib.CreateCaCertificate(certPath)
+	caKey, caCert, err := pkcs8.CreateCaCertificatePEM(certPath)
 	if err != nil {
 		return nil, err
 	}
@@ -80,11 +81,16 @@ func (es *Elasticsearch) createCertSecret() (*corev1.SecretVolumeSource, error) 
 	if err != nil {
 		return nil, err
 	}
+	rootKey, err := ioutil.ReadFile(filepath.Join(certPath, certlib.RootKey))
+	if err != nil {
+		return nil, err
+	}
 	data := map[string][]byte{
 		certlib.RootCert: rootCa,
+		certlib.RootKey:  rootKey,
 	}
 
-	err = certlib.CreateNodeCertificatePEM(certPath, es.elasticsearch, caKey, caCert)
+	err = pkcs8.CreateNodeCertificatePEM(certPath, es.elasticsearch, caKey, caCert)
 	if err != nil {
 		return nil, err
 	}
@@ -99,7 +105,7 @@ func (es *Elasticsearch) createCertSecret() (*corev1.SecretVolumeSource, error) 
 	data[certlib.NodeKey] = nodeKey
 	data[certlib.NodeCert] = nodeCert
 
-	if err := certlib.CreateAdminCertificatePEM(certPath, es.elasticsearch, caKey, caCert); err != nil {
+	if err := pkcs8.CreateAdminCertificatePEM(certPath, es.elasticsearch, caKey, caCert); err != nil {
 		return nil, err
 	}
 	adminCert, err := ioutil.ReadFile(filepath.Join(certPath, certlib.AdminCert))
@@ -112,6 +118,20 @@ func (es *Elasticsearch) createCertSecret() (*corev1.SecretVolumeSource, error) 
 	}
 	data[certlib.AdminKey] = adminKey
 	data[certlib.AdminCert] = adminCert
+
+	if err := pkcs8.CreateClientCertificatePEM(certPath, es.elasticsearch, caKey, caCert); err != nil {
+		return nil, err
+	}
+	clientCert, err := ioutil.ReadFile(filepath.Join(certPath, certlib.ClientCert))
+	if err != nil {
+		return nil, err
+	}
+	clientKey, err := ioutil.ReadFile(filepath.Join(certPath, certlib.ClientKey))
+	if err != nil {
+		return nil, err
+	}
+	data[certlib.ClientKey] = clientKey
+	data[certlib.ClientCert] = clientCert
 
 	name := fmt.Sprintf("%v-cert", es.elasticsearch.OffshootName())
 	secret := &corev1.Secret{
