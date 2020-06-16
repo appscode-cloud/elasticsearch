@@ -115,12 +115,12 @@ func (es *Elasticsearch) ensureStatefulSet(
 
 	// Get elasticsearch container.
 	// Also get monitoring sidecar if any.
-	containers, err := es.getContainers2(esNode, envList)
+	containers, err := es.getContainers(esNode, envList)
 	if err != nil {
 		return kutil.VerbUnchanged, errors.Wrap(err, "failed to get containers")
 	}
 
-	volumes, pvc, err := es.getVolumes2(esNode)
+	volumes, pvc, err := es.getVolumes(esNode)
 	if err != nil {
 		return kutil.VerbUnchanged, errors.Wrap(err, "failed to get volumes")
 	}
@@ -199,7 +199,7 @@ func (es *Elasticsearch) ensureStatefulSet(
 	return vt, nil
 }
 
-func (es *Elasticsearch) getVolumes2(esNode *api.ElasticsearchNode) ([]corev1.Volume, *corev1.PersistentVolumeClaim, error) {
+func (es *Elasticsearch) getVolumes(esNode *api.ElasticsearchNode) ([]corev1.Volume, *corev1.PersistentVolumeClaim, error) {
 	if esNode == nil {
 		return nil, nil, errors.New("elasticsearchNode is empty")
 	}
@@ -356,149 +356,7 @@ func (es *Elasticsearch) getVolumes2(esNode *api.ElasticsearchNode) ([]corev1.Vo
 	return volumes, pvc, nil
 }
 
-func (es *Elasticsearch) getVolumes(esNode *api.ElasticsearchNode) ([]corev1.Volume, *corev1.PersistentVolumeClaim, error) {
-	if esNode == nil {
-		return nil, nil, errors.New("elasticsearchNode is empty")
-	}
-
-	var volumes []corev1.Volume
-	var pvc *corev1.PersistentVolumeClaim
-
-	// Upsert Volume for configuration directory
-	volumes = core_util.UpsertVolume(volumes, corev1.Volume{
-		Name: "esconfig",
-		VolumeSource: corev1.VolumeSource{
-			EmptyDir: &corev1.EmptyDirVolumeSource{},
-		},
-	})
-
-	// Upsert Volume for the default configuration provided for x-pack.
-	// This configuration will also be copied as default elasticsearch configuration (i.e. elasticsearch.yaml)
-	// from config-merger initContainer.
-	if !es.elasticsearch.Spec.DisableSecurity {
-		cmName := fmt.Sprintf("%v-%v", es.elasticsearch.OffshootName(), DatabaseConfigMapSuffix)
-		_, err := es.kClient.CoreV1().ConfigMaps(es.elasticsearch.GetNamespace()).Get(context.TODO(), cmName, metav1.GetOptions{})
-		if err != nil {
-			return nil, nil, errors.Wrap(err, fmt.Sprintf("failed to get configmap: %s/%s", es.elasticsearch.GetNamespace(), cmName))
-		}
-
-		volumes = core_util.UpsertVolume(volumes, corev1.Volume{
-			Name: "temp-esconfig",
-			VolumeSource: corev1.VolumeSource{
-				ConfigMap: &corev1.ConfigMapVolumeSource{
-					LocalObjectReference: corev1.LocalObjectReference{
-						Name: cmName,
-					},
-				},
-			},
-		})
-	}
-
-	// Upsert Volume for user provided custom configuration.
-	// These configuration will be merged to default config yaml (ie. elasticsearch.yaml)
-	// from config-merger initContainer.
-	if es.elasticsearch.Spec.ConfigSource != nil {
-		volumes = core_util.UpsertVolume(volumes, corev1.Volume{
-			Name:         "custom-config",
-			VolumeSource: *es.elasticsearch.Spec.ConfigSource,
-		})
-	}
-
-	// Upsert Volume for data directory.
-	// If storageType is "Ephemeral", add volume of "EmptyDir" type.
-	// The storageType is default to "Durable".
-	if es.elasticsearch.Spec.StorageType == api.StorageTypeEphemeral {
-		ed := corev1.EmptyDirVolumeSource{}
-		if esNode.Storage != nil {
-			if sz, found := esNode.Storage.Resources.Requests[corev1.ResourceStorage]; found {
-				ed.SizeLimit = &sz
-			}
-		}
-		volumes = core_util.UpsertVolume(volumes, corev1.Volume{
-			Name: "data",
-			VolumeSource: corev1.VolumeSource{
-				EmptyDir: &ed,
-			},
-		})
-	} else {
-		if len(esNode.Storage.AccessModes) == 0 {
-			esNode.Storage.AccessModes = []corev1.PersistentVolumeAccessMode{
-				corev1.ReadWriteOnce,
-			}
-			log.Infof(`Using "%v" as AccessModes in "%v"`, corev1.ReadWriteOnce, esNode.Storage)
-		}
-
-		pvc = &corev1.PersistentVolumeClaim{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: "data",
-			},
-			Spec: *esNode.Storage,
-		}
-		if esNode.Storage.StorageClassName != nil {
-			pvc.Annotations = map[string]string{
-				"volume.beta.kubernetes.io/storage-class": *esNode.Storage.StorageClassName,
-			}
-		}
-	}
-
-	// Upsert Volume for certificates
-	if es.elasticsearch.Spec.CertificateSecret == nil && !es.elasticsearch.Spec.DisableSecurity {
-		return nil, nil, errors.New("Certificate secret is missing")
-	}
-	if !es.elasticsearch.Spec.DisableSecurity {
-		volumes = core_util.UpsertVolume(volumes, corev1.Volume{
-			Name: "certs",
-			VolumeSource: corev1.VolumeSource{
-				Secret: &corev1.SecretVolumeSource{
-					SecretName: es.elasticsearch.Spec.CertificateSecret.SecretName,
-					Items: []corev1.KeyToPath{
-						{
-							Key:  certlib.RootKeyStore,
-							Path: certlib.RootKeyStore,
-						},
-						{
-							Key:  certlib.NodeKeyStore,
-							Path: certlib.NodeKeyStore,
-						},
-						{
-							Key:  certlib.ClientKeyStore,
-							Path: certlib.ClientKeyStore,
-						},
-					},
-				},
-			},
-		})
-	}
-
-	// Upsert Volume for monitoring sidecar
-	if es.elasticsearch.GetMonitoringVendor() == mona.VendorPrometheus && es.elasticsearch.Spec.EnableSSL {
-		volumes = core_util.UpsertVolume(volumes, corev1.Volume{
-			Name: "exporter-certs",
-			VolumeSource: corev1.VolumeSource{
-				Secret: &corev1.SecretVolumeSource{
-					SecretName: es.elasticsearch.Spec.CertificateSecret.SecretName,
-					Items: []corev1.KeyToPath{
-						{
-							Key:  "root.pem",
-							Path: "root.pem",
-						},
-					},
-				},
-			},
-		})
-	}
-
-	// Upsert temp Volume
-	volumes = core_util.UpsertVolume(volumes, corev1.Volume{
-		Name: "temp",
-		VolumeSource: corev1.VolumeSource{
-			EmptyDir: &corev1.EmptyDirVolumeSource{},
-		},
-	})
-	return volumes, pvc, nil
-}
-
-func (es *Elasticsearch) getContainers2(esNode *api.ElasticsearchNode, envList []corev1.EnvVar) ([]corev1.Container, error) {
+func (es *Elasticsearch) getContainers(esNode *api.ElasticsearchNode, envList []corev1.EnvVar) ([]corev1.Container, error) {
 	if esNode == nil {
 		return nil, errors.New("ElasticsearchNode is empty")
 	}
@@ -531,76 +389,6 @@ func (es *Elasticsearch) getContainers2(esNode *api.ElasticsearchNode, envList [
 				MountPath: filepath.Join(ConfigFileMountPath, "certs"),
 			},
 		}...)
-	}
-
-	containers := []corev1.Container{
-		{
-			Name:            api.ResourceSingularElasticsearch,
-			Image:           es.esVersion.Spec.DB.Image,
-			ImagePullPolicy: corev1.PullIfNotPresent,
-			Env:             envList,
-
-			// The clientPort is only necessary for Client nodes.
-			// But it is set for all type of nodes, so that our controller can
-			// communicate with each nodes specifically.
-			// The DBA controller uses the clientPort to check health of a node.
-			Ports: []corev1.ContainerPort{defaultClientPort, defaultPeerPort, defaultMetricsPort},
-			SecurityContext: &corev1.SecurityContext{
-				Privileged: types.BoolP(false),
-				Capabilities: &corev1.Capabilities{
-					Add: []corev1.Capability{"IPC_LOCK", "SYS_RESOURCE"},
-				},
-			},
-			Resources:      esNode.Resources,
-			VolumeMounts:   volumeMount,
-			LivenessProbe:  es.elasticsearch.Spec.PodTemplate.Spec.LivenessProbe,
-			ReadinessProbe: es.elasticsearch.Spec.PodTemplate.Spec.ReadinessProbe,
-			Lifecycle:      es.elasticsearch.Spec.PodTemplate.Spec.Lifecycle,
-		},
-	}
-
-	// upsert metrics exporter sidecar for monitoring purpose
-	var err error
-	if es.elasticsearch.Spec.Monitor != nil {
-		containers, err = es.upsertMonitoringContainer(containers)
-		if err != nil {
-			return nil, errors.Wrap(err, "failed to get monitoring container")
-		}
-	}
-
-	return containers, nil
-}
-
-func (es *Elasticsearch) getContainers(esNode *api.ElasticsearchNode, envList []corev1.EnvVar) ([]corev1.Container, error) {
-	if esNode == nil {
-		return nil, errors.New("ElasticsearchNode is empty")
-	}
-
-	// Add volumeMounts for elasticsearch container
-	// 		- data directory
-	//		- configuration
-	// 		- temp directory
-	volumeMount := []corev1.VolumeMount{
-		{
-			Name:      "data",
-			MountPath: DataDir,
-		},
-		{
-			Name:      "esconfig",
-			MountPath: filepath.Join(ConfigFileMountPath, ConfigFileName),
-			SubPath:   ConfigFileName,
-		},
-		{
-			Name:      "temp",
-			MountPath: "/tmp",
-		},
-	}
-
-	if !es.elasticsearch.Spec.DisableSecurity {
-		volumeMount = core_util.UpsertVolumeMount(volumeMount, corev1.VolumeMount{
-			Name:      "certs",
-			MountPath: filepath.Join(ConfigFileMountPath, "certs"),
-		})
 	}
 
 	containers := []corev1.Container{
